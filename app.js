@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const KEY = 'blackbox-dashboard-v1';
-  const empty = () => ({weekly: [], content: [], conversion: [], summary: null, demo: false, importedAt: ''});
+  const empty = () => ({weekly: [], content: [], conversion: [], daily: [], platformSummary: {}, summary: null, demo: false, importedAt: ''});
   const demoData = () => ({
     weekly: [
       {period:'10/5–10/11',xhs:5,douyin:6,likes:13,comments:1,saves:3,reviews:2,notes:'演示记录'},
@@ -43,12 +43,12 @@
   function weeklySorted(){return [...data.weekly].sort((a,b)=>sortPeriod(a.period)-sortPeriod(b.period))}
   function metric(label,value,foot,icon,highlight=false){return `<div class="metric-card${highlight?' highlight':''}"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon}</span></div><div class="metric-value">${esc(value)}</div><div class="metric-foot">${esc(foot)}</div></div>`}
   function emptyHtml(message){return `<div class="empty-state">${esc(message)}</div>`}
-  const titles={overview:['经营总览','运营数据总览','内容增长、用户互动、线索转化，一屏看清工作室运营状态。'],content:['作品分析','哪些内容真的有效？','用播放量和互动率识别选题，而不是只靠感觉。'],weekly:['周报记录','每一周的努力，都有迹可循','发布、互动、评价按同一口径登记，方便老板查看。'],conversion:['转化追踪','从流量到实际成交','没有真实成交数据时不虚构转化率。'],manage:['数据管理','你的数据，由你掌控','上传平台报表，或下载模板持续记录。']};
+  const titles={platform:['平台趋势','每天的观看趋势','抖音和小红书账号数据按平台呈现，不与作品榜混用。'],overview:['经营总览','运营数据总览','内容增长、用户互动、线索转化，一屏看清工作室运营状态。'],content:['作品分析','哪些内容真的有效？','用播放量和互动率识别选题，而不是只靠感觉。'],weekly:['周报记录','每一周的努力，都有迹可循','发布、互动、评价按同一口径登记，方便老板查看。'],conversion:['转化追踪','从流量到实际成交','没有真实成交数据时不虚构转化率。'],manage:['数据管理','你的数据，由你掌控','上传平台报表，或下载模板持续记录。']};
   function switchView(view){activeView=view;document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===view));document.querySelectorAll('.view').forEach(n=>n.classList.toggle('active',n.id==='view-'+view));let t=titles[view];$('crumbTitle').textContent=t[0];$('pageTitle').textContent=t[1];$('pageDesc').textContent=t[2];location.hash=view==='overview'?'overview':view;render()}
   function render(){
     const status=$('datasetStatus');status.textContent=data.demo?'演示数据 · 非真实经营结果':'真实数据 · 本地读取';status.style.color=data.demo?'':'#84d8ab';status.style.background=data.demo?'':'#183027';status.style.borderColor=data.demo?'':'#315b47';
     $('updateStatus').textContent=data.importedAt?'最近导入 '+data.importedAt:'尚未导入真实报表';
-    renderOverview();renderContent();renderWeekly();renderConversion();
+    renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();
   }
   function getOverviewTotals(){if(data.summary){const cutoff=num(data.summary.baselineWeekSort)||Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)));const extra=data.weekly.filter(w=>sortPeriod(w.period)>cutoff);return {xhs:num(data.summary.xhs)+sum(extra,'xhs'),douyin:num(data.summary.douyin)+sum(extra,'douyin'),likes:num(data.summary.likes)+sum(extra,'likes'),comments:num(data.summary.comments)+sum(extra,'comments'),saves:num(data.summary.saves)+sum(extra,'saves'),reviews:num(data.summary.reviews)+sum(extra,'reviews'),source:extra.length?'已登记累计 + 后续新增 '+extra.length+' 周（不重复计数）':'已登记累计（按月度汇总，不与周数据累加）'}}return {xhs:sum(data.weekly,'xhs'),douyin:sum(data.weekly,'douyin'),likes:sum(data.weekly,'likes'),comments:sum(data.weekly,'comments'),saves:sum(data.weekly,'saves'),reviews:sum(data.weekly,'reviews'),source:'已导入周报合计（非完整自然月）'}}
   function renderOverview(){const t=getOverviewTotals(), w=weeklySorted(), latest=w[w.length-1], prev=w[w.length-2];
@@ -87,7 +87,31 @@
     $('contentMetrics').innerHTML=[metric('已收录作品',nfmt(rows.length),'只计导入的作品明细','▤',true),metric('总播放 / 阅读',rows.length?nfmt(allViews):'—','与周报统计范围可能不同','▷'),metric('作品总互动',rows.length?nfmt(likes+comments+saves):'—','点赞 + 评论 + 收藏','♡'),metric('按播放量加权互动率',rate==null?'—':rate.toFixed(2)+'%',rate==null?'缺少有效播放量':'互动总和 ÷ 播放总和','↗')].join('');
     let compare=(a,b)=>{let va=contentSort==='rate'?contentRate(a):a[contentSort],vb=contentSort==='rate'?contentRate(b):b[contentSort];if(contentSort==='date'){va=String(va||'');vb=String(vb||'');return contentSortDesc?vb.localeCompare(va):va.localeCompare(vb)}return contentSortDesc?num(vb)-num(va):num(va)-num(vb)};rows=[...rows].sort(compare);
     $('contentCount').textContent=rows.length+' 条作品';
-    $('contentRows').innerHTML=rows.length?rows.slice(0,1500).map(r=>{let rate=contentRate(r);return `<tr><td class="title-cell" title="${esc(r.title)}">${esc(r.title||'未命名作品')}</td><td><span class="platform-pill ${r.platform==='小红书'?'xhs':''}">${esc(r.platform||'未分类')}</span></td><td>${esc(r.date||'—')}</td><td>${num(r.views)?nfmt(r.views):'—'}</td><td>${nfmt(r.likes)}</td><td>${nfmt(r.comments)}</td><td>${nfmt(r.saves)}</td><td class="${rate!=null?'positive':''}">${rate==null?'—':rate.toFixed(2)+'%'}</td></tr>`}).join(''):`<tr><td class="table-empty" colspan="8">暂无作品明细。请导入抖音或小红书作品数据，或使用「作品明细模板」。</td></tr>`;
+    $('contentRows').innerHTML=rows.length?rows.slice(0,1500).map(r=>{let rate=contentRate(r);return `<tr><td class="title-cell" title="${esc(r.title)}">${esc(r.title||'未命名作品')}</td><td><span class="platform-pill ${r.platform==='小红书'?'xhs':''}">${esc(r.platform||'未分类')}</span></td><td>${esc(r.date||'—')}</td><td>${num(r.views)?nfmt(r.views):'—'}</td><td>${nfmt(r.likes)}</td><td>${nfmt(r.comments)}</td><td>${nfmt(r.saves)}</td><td class="${rate!=null?'positive':''}">${rate==null?'—':rate.toFixed(2)+'%'}</td></tr>`}).join(''):`<tr><td class="table-empty" colspan="8">暂无单条作品明细。每日账号汇总请看「平台趋势」；作品排名需要含「作品标题」的导出表。</td></tr>`;
+  }
+  function renderPlatform(){
+    const platform=$('dailyPlatform').value;
+    const rows=(data.daily||[]).filter(r=>r.platform===platform).sort((a,b)=>a.date.localeCompare(b.date));
+    const summary=(data.platformSummary||{})[platform]||{};
+    const hasData=rows.length>0||Object.keys(summary).length>0;
+    const views=summary.views!=null?summary.views:sum(rows,'views');
+    const exposures=summary.exposures!=null?summary.exposures:sum(rows,'exposures');
+    const average=key=>{const a=rows.map(r=>r[key]).filter(v=>v!=null&&Number.isFinite(Number(v)));return a.length?a.reduce((s,v)=>s+Number(v),0)/a.length:null};
+    const pct=n=>n==null?'—':Number(n).toFixed(1)+'%';
+    const cards=platform==='小红书'?[metric('30天观看',hasData?nfmt(views):'—','账号汇总观看','▷',true),metric('30天曝光',hasData?nfmt(exposures):'—','账号汇总曝光','▤'),metric('封面点击率',pct(summary.coverCtr),'账号整体指标','↗'),metric('视频完播率',pct(summary.completion),'账号整体指标','♡')]:[metric('30天播放',hasData?nfmt(views):'—','账号每日播放汇总','▷',true),metric('30天投稿',hasData?nfmt(sum(rows,'posts')):'—','每日投稿累加','▤'),metric('日均5秒完播率',pct(average('completion5')),'每日百分比简单平均','↗'),metric('日均2秒跳出率',pct(average('bounce2')),'每日百分比简单平均','♡')];
+    $('platformMetrics').innerHTML=cards.join('');
+    $('dailyCount').textContent=rows.length+' 天';
+    $('platformPeriod').textContent=rows.length?('已导入 '+rows[0].date+' 至 '+rows[rows.length-1].date+' · '+platform):'尚未导入'+platform+'的每日数据';
+    if(!rows.length){$('platformChart').innerHTML=emptyHtml('尚无'+platform+'日报数据。请到「数据管理」导入对应 Excel。');$('platformRows').innerHTML='<tr><td colspan="9" class="table-empty">尚无每日趋势数据</td></tr>';return;}
+    const subset=rows.slice(-30),W=850,H=236,left=50,right=16,top=20,bottom=191;
+    const width=(W-left-right)/subset.length,max=Math.max(1,...subset.map(r=>num(r.views)));
+    const y=v=>bottom-(num(v)/max)*(bottom-top);
+    const parts=[];
+    for(let i=0;i<=4;i++){let val=max*i/4,py=y(val);parts.push('<line class="gridline" x1="'+left+'" y1="'+py+'" x2="'+(W-right)+'" y2="'+py+'"/><text class="axis-label" x="'+(left-7)+'" y="'+(py+4)+'" text-anchor="end">'+Math.round(val)+'</text>');}
+    subset.forEach((r,i)=>{const barWidth=Math.max(4,width*.55),x=left+i*width+(width-barWidth)/2,py=y(r.views);parts.push('<rect class="chartbar" x="'+x+'" y="'+py+'" width="'+barWidth+'" height="'+Math.max(1,bottom-py)+'" rx="3"><title>'+esc(r.date)+'：'+nfmt(r.views)+' 次</title></rect>');if(i===0||i===subset.length-1||i%5===0)parts.push('<text class="axis-label" x="'+(left+(i+.5)*width)+'" y="218" text-anchor="middle">'+esc(r.date.slice(5))+'</text>')});
+    $('platformChart').innerHTML='<svg class="chart-svg" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(platform)+'每日观看播放柱状图" preserveAspectRatio="xMidYMid meet">'+parts.join('')+'</svg>';
+    const fmt=n=>n==null?'—':nfmt(n),rate=n=>n==null?'—':Number(n).toFixed(1)+'%';
+    $('platformRows').innerHTML=rows.slice().reverse().map(r=>'<tr><td>'+esc(r.date)+'</td><td>'+fmt(r.views)+'</td><td>'+fmt(r.exposures)+'</td><td>'+fmt(r.posts)+'</td><td>'+fmt(r.likes)+'</td><td>'+rate(r.coverCtr)+'</td><td>'+rate(platform==='小红书'?r.completion:r.completion5)+'</td><td>'+rate(r.bounce2)+'</td><td>'+(r.avgWatchSeconds==null?'—':Number(r.avgWatchSeconds).toFixed(1)+'秒')+'</td></tr>').join('');
   }
   function renderWeekly(){const rows=weeklySorted().reverse();$('weeklyRows').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.period)}</td><td>${nfmt(r.xhs)}</td><td>${nfmt(r.douyin)}</td><td class="positive">${nfmt(num(r.xhs)+num(r.douyin))}</td><td>${nfmt(r.likes)}</td><td>${nfmt(r.comments)}</td><td>${nfmt(r.saves)}</td><td>${nfmt(r.reviews)}</td><td class="notes" title="${esc(r.notes)}">${esc(r.notes||'—')}</td></tr>`).join(''):`<tr><td colspan="9" class="table-empty">暂无周报记录，请导入 Excel 或手动添加。</td></tr>`}
   function renderConversion(){let rows=data.conversion;const c=sum(rows,'consults'),a=sum(rows,'appointments'),t=sum(rows,'trials'),o=sum(rows,'orders'),amt=sum(rows,'amount');let has=rows.length>0;
@@ -110,18 +134,74 @@
   function inferPlatform(name){let s=String(name);return /小红书|xhs|xiaohongshu/i.test(s)?'小红书':/抖音|douyin/i.test(s)?'抖音':/美团|点评/i.test(s)?'美团/点评':''}
   function parseDetailRows(rows,fileLabel){const h=detectHeader(rows,contentFields,'content');if(h.index<0)return [];let out=[];for(let i=h.index+1;i<Math.min(rows.length,h.index+5001);i++){const r=rows[i],title=String(valAt(r,h.map.title)).trim();if(!title||headerHas(title,['合计','总计','汇总','平均'])&&title.length<5)continue;let hasValues=[h.map.views,h.map.likes,h.map.comments,h.map.saves].some(j=>j>=0&&String(valAt(r,j)).trim()!=='');if(!hasValues)continue;let platform=String(valAt(r,h.map.platform)).trim()||inferPlatform(fileLabel)||'未分类';out.push({date:formatExcelDate(valAt(r,h.map.date)),platform,title,views:num(valAt(r,h.map.views)),likes:num(valAt(r,h.map.likes)),comments:num(valAt(r,h.map.comments)),saves:num(valAt(r,h.map.saves)),shares:num(valAt(r,h.map.shares)),topic:String(valAt(r,h.map.topic)).trim()})}return out}
   function parseConversionRows(rows,fileLabel){const h=detectHeader(rows,conversionFields,'conversion');if(h.index<0)return [];let out=[];for(let i=h.index+1;i<Math.min(rows.length,h.index+5001);i++){const r=rows[i],date=formatExcelDate(valAt(r,h.map.date));if(!date||headerHas(date,['合计','总计','汇总']))continue;let vals=['consults','appointments','trials','orders','amount'].map(k=>num(valAt(r,h.map[k])));if(vals.every(v=>v===0)&&!String(valAt(r,h.map.notes)).trim())continue;out.push({date,platform:String(valAt(r,h.map.platform)).trim()||inferPlatform(fileLabel)||'未分类',consults:vals[0],appointments:vals[1],trials:vals[2],orders:vals[3],amount:vals[4],notes:String(valAt(r,h.map.notes)).trim()})}return out}
+  function metricNumber(v){
+    const s=String(v??'').trim().replace(/[,，\s]/g,'');
+    if(!s)return null;
+    const m=s.match(/-?\d+(?:\.\d+)?/);
+    return m?Number(m[0])*(s.includes('万')?10000:1):null;
+  }
+  function parsePlatformAggregate(sheets){
+    const result={daily:[],platformSummary:{}};
+    for(const sheet of sheets){
+      const rows=sheetArray(sheet.rows);
+      const header=rows.findIndex(r=>idxOf(r,['日期'])>=0&&idxOf(r,['投稿量'])>=0&&idxOf(r,['总播放量'])>=0);
+      if(header<0)continue;
+      const h=rows[header],p={};
+      for(const [k,aliases] of Object.entries({date:['日期'],posts:['投稿量'],views:['总播放量'],likes:['总点赞量'],comments:['总评论量'],shares:['总分享量'],completion5:['5秒完播率'],bounce2:['2秒跳出率'],coverCtr:['封面点击率'],avgWatchSeconds:['平均播放时长']}))p[k]=idxOf(h,aliases);
+      for(const row of rows.slice(header+1,header+5001)){
+        const date=formatExcelDate(valAt(row,p.date));
+        if(!/^20\d{2}-\d{2}-\d{2}$/.test(date))continue;
+        const v={date,platform:'抖音'};
+        for(const k of Object.keys(p).filter(k=>k!=='date'))v[k]=metricNumber(valAt(row,p[k]));
+        result.daily.push(v);
+      }
+      if(result.daily.length)return result;
+    }
+    const hasXhs=sheets.some(s=>['账号总体观看数据','曝光趋势','观看趋势'].some(k=>String(s.name).includes(k)));
+    if(!hasXhs)return result;
+    const byDate=new Map();
+    const names={'曝光趋势':'exposures','观看趋势':'views','封面点击率趋势':'coverCtr','平均观看时长趋势':'avgWatchSeconds','观看总时长趋势':'totalWatchSeconds','视频完播率趋势':'completion'};
+    for(const sheet of sheets){
+      const rows=sheetArray(sheet.rows),name=String(sheet.name||'');
+      if(name.includes('账号总体观看数据')){
+        const summary={};
+        for(const row of rows.slice(1)){
+          const label=String(row[0]??'').trim(),v=metricNumber(row[1]);
+          if(v==null||label.includes('环比'))continue;
+          if(label==='曝光')summary.exposures=v;
+          else if(label==='观看')summary.views=v;
+          else if(label.startsWith('封面点击率'))summary.coverCtr=v;
+          else if(label.startsWith('平均观看时长'))summary.avgWatchSeconds=v;
+          else if(label.startsWith('总观看时长'))summary.totalWatchSeconds=v;
+          else if(label.startsWith('总完播率'))summary.completion=v;
+        }
+        if(Object.keys(summary).length)result.platformSummary['小红书']=summary;
+      }else{
+        const metric=Object.keys(names).find(k=>name.includes(k));
+        if(!metric)continue;
+        for(const row of rows.slice(1,5001)){
+          const date=formatExcelDate(row[0]),value=metricNumber(row[1]);
+          if(!/^20\d{2}-\d{2}-\d{2}$/.test(date)||value==null)continue;
+          const rec=byDate.get(date)||{date,platform:'小红书'};
+          rec[names[metric]]=value;byDate.set(date,rec);
+        }
+      }
+    }
+    result.daily=[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
+    return result;
+  }
   function processSheets(sheets,filename){let result={weekly:[],content:[],conversion:[],summary:null};for(const s of sheets){let rows=sheetArray(s.rows);let found=parseWeeklySections(rows);result.weekly.push(...found.weeks);if(found.summary)result.summary=found.summary;result.content.push(...parseDetailRows(rows,filename+' '+s.name));result.conversion.push(...parseConversionRows(rows,filename+' '+s.name))}
     // 总览工作簿通常还有每周的辅助工作表，不在这里重复纳入。
     if(!result.weekly.length){for(const s of sheets)result.weekly.push(...parseWeeklyPlatformSheet(sheetArray(s.rows),s.name))}
     // 支持标准化 CSV 的「统计区间」周报表。
     if(!result.weekly.length){for(const s of sheets){let rows=sheetArray(s.rows);let idx=rows.findIndex(r=>idxOf(r,['统计区间','周度区间'])>=0&&idxOf(r,['抖音发布'])>=0);if(idx>=0){let m=fieldIndices(rows[idx]);rows.slice(idx+1).forEach(r=>{let p=String(valAt(r,m.period)).trim();if(p&&/\d/.test(p))result.weekly.push({period:p,xhs:num(valAt(r,m.xhs)),douyin:num(valAt(r,m.douyin)),likes:num(valAt(r,m.likes)),comments:num(valAt(r,m.comments)),saves:num(valAt(r,m.saves)),reviews:num(valAt(r,m.reviews)),notes:String(valAt(r,m.notes)).trim()})})}}}
-    return result}
+    const aggregate=parsePlatformAggregate(sheets);result.daily=aggregate.daily;result.platformSummary=aggregate.platformSummary;return result}
   function dedupeMerge(current,addition,key){const map=new Map(current.map((r,i)=>[key(r)||'old:'+i,r]));addition.forEach((r,i)=>map.set(key(r)||'new:'+i,r));return [...map.values()]}
-  function mergeData(incoming){if(data.demo){data=empty()}data.weekly=dedupeMerge(data.weekly,incoming.weekly,r=>String(r.period).replace(/\s/g,''));data.content=dedupeMerge(data.content,incoming.content,r=>[r.platform,r.date,r.title].join('|'));data.conversion=dedupeMerge(data.conversion,incoming.conversion,r=>[r.date,r.platform,r.notes].join('|'));if(incoming.summary)data.summary={...incoming.summary,baselineWeekSort:Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)))};data.demo=false;data.importedAt=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});persist();render()}
-  async function parseFile(file){if(file.size>20*1024*1024)throw new Error('文件超过 20MB，请先导出精简版');let name=file.name.toLowerCase();if(name.endsWith('.json')){let json=JSON.parse(await file.text());if(!Array.isArray(json.weekly)||!Array.isArray(json.content)||!Array.isArray(json.conversion))throw new Error('JSON 结构不符合本项目备份格式');return {weekly:json.weekly,content:json.content,conversion:json.conversion,summary:json.summary||null}}
+  function mergeData(incoming){if(data.demo){data=empty()}data.weekly=dedupeMerge(data.weekly,incoming.weekly,r=>String(r.period).replace(/\s/g,''));data.content=dedupeMerge(data.content,incoming.content,r=>[r.platform,r.date,r.title].join('|'));data.conversion=dedupeMerge(data.conversion,incoming.conversion,r=>[r.date,r.platform,r.notes].join('|'));data.daily=dedupeMerge(data.daily||[],incoming.daily||[],r=>[r.platform,r.date].join('|'));data.platformSummary={...(data.platformSummary||{}),...(incoming.platformSummary||{})};if(incoming.summary)data.summary={...incoming.summary,baselineWeekSort:Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)))};data.demo=false;data.importedAt=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});persist();render()}
+  async function parseFile(file){if(file.size>20*1024*1024)throw new Error('文件超过 20MB，请先导出精简版');let name=file.name.toLowerCase();if(name.endsWith('.json')){let json=JSON.parse(await file.text());if(!Array.isArray(json.weekly)||!Array.isArray(json.content)||!Array.isArray(json.conversion))throw new Error('JSON 结构不符合本项目备份格式');return {weekly:json.weekly,content:json.content,conversion:json.conversion,daily:json.daily||[],platformSummary:json.platformSummary||{},summary:json.summary||null}}
     if(name.endsWith('.csv')){const text=(await file.text()).replace(/^\ufeff/,'');return processSheets([{name:file.name,rows:splitCSV(text)}],file.name)}
     if(name.endsWith('.xlsx')||name.endsWith('.xls')){if(!window.XLSX)throw new Error('Excel 解析组件未加载。请联网重试，或在 WPS/Excel 中另存为 CSV 导入');const buf=await file.arrayBuffer();let wb=window.XLSX.read(buf,{type:'array',cellDates:false,raw:true});let sheets=wb.SheetNames.map(s=>({name:s,rows:window.XLSX.utils.sheet_to_json(wb.Sheets[s],{header:1,defval:'',raw:true,blankrows:false})}));return processSheets(sheets,file.name)}throw new Error('仅支持 .xlsx / .xls / .csv / .json')}
-  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：未识别可用列，请参考标准模板');continue}mergeData(r);reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
+  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}mergeData(r);reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
   function saveText(filename,content,type='text/plain;charset=utf-8'){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);let a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),6000)}
   function csvOut(rows){return '\ufeff'+rows.map(r=>r.map(v=>{let s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}).join(',')).join('\r\n')}
   function setup(){
@@ -136,6 +216,7 @@
     for(const name of ['dragleave','drop'])$('uploadZone').addEventListener(name,e=>{e.preventDefault();$('uploadZone').classList.remove('dragging')});
     $('uploadZone').addEventListener('drop',e=>importFiles(e.dataTransfer.files));
     $('contentPlatform').addEventListener('change',e=>{filterPlatform=e.target.value;renderContent()});
+    $('dailyPlatform').addEventListener('change',renderPlatform);
     document.querySelectorAll('.sort').forEach(el=>el.addEventListener('click',()=>{const s=el.dataset.sort;if(contentSort===s)contentSortDesc=!contentSortDesc;else{contentSort=s;contentSortDesc=true}renderContent()}));
     $('openWeekForm').addEventListener('click',()=>$('weekDialog').showModal());
     $('closeWeekForm').addEventListener('click',()=>$('weekDialog').close());

@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#111217" />
   <meta name="description" content="黑箱健身工作室私教运营数据看板。所有表格均在浏览器本地读取，不会上传到服务器。" />
   <title>黑箱健身 · 运营数据看板</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=1.1" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=1.1" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +21,7 @@
       <nav class="nav" aria-label="页面导航">
         <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span> 经营总览</button>
         <button class="nav-item" data-view="content"><span class="nav-icon">▤</span> 作品分析</button>
+        <button class="nav-item" data-view="platform"><span class="nav-icon">▥</span> 平台趋势</button>
         <button class="nav-item" data-view="weekly"><span class="nav-icon">▥</span> 周报记录</button>
         <button class="nav-item" data-view="conversion"><span class="nav-icon">◎</span> 转化追踪</button>
         <button class="nav-item" data-view="manage"><span class="nav-icon">⌘</span> 数据管理</button>
@@ -69,6 +70,13 @@
           <p class="footnote">互动率 =（点赞＋评论＋收藏）÷ 播放/阅读量。仅对有播放量的作品计算；不同平台定义可能不同，请结合各平台后台口径使用。</p>
         </div>
 
+        <div id="view-platform" class="view">
+          <div class="section-head"><div><h2>账号平台趋势</h2><p>抖音、小红书按天统计，不把每日汇总当作单条作品</p></div><select id="dailyPlatform" class="select"><option value="小红书">小红书</option><option value="抖音">抖音</option></select></div>
+          <div class="metric-grid compact" id="platformMetrics"></div>
+          <section class="panel"><div class="panel-header"><div><h3>每日观看 / 播放趋势</h3><p id="platformPeriod">仅展示已导入的真实数据</p></div><span class="tag tag-outline" id="dailyCount">0 天</span></div><div id="platformChart" class="chart-wrap"></div></section>
+          <section class="panel below-panel"><div class="panel-header"><div><h3>每日明细</h3><p>两个平台的完播率指标不同，不作直接对比；缺失值显示横杠而非0</p></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>日期</th><th>观看/播放</th><th>曝光</th><th>投稿</th><th>点赞</th><th>封面点击率</th><th>完播率*</th><th>2秒跳出率</th><th>平均观看时长</th></tr></thead><tbody id="platformRows"></tbody></table></div><p class="footnote">*小红书为视频完播率；抖音为5秒完播率。每日播放是当天账号总量，不等于当天发布作品的播放量。</p></section>
+        </div>
+
         <div id="view-weekly" class="view">
           <div class="section-head"><div><h2>周度运营记录</h2><p>把每周交给老板的记录变成可比较的数据</p></div><button class="btn btn-secondary" id="openWeekForm">＋ 手动添加一周</button></div>
           <div class="panel"><div class="panel-header"><div><h3>周度明细</h3><p>按登记表原有口径汇总</p></div><button class="btn btn-small" id="exportWeekCsv">导出 CSV</button></div><div class="table-scroll"><table class="data-table"><thead><tr><th>统计区间</th><th>小红书发布</th><th>抖音发布</th><th>发布合计</th><th>点赞</th><th>评论</th><th>收藏</th><th>点评好评</th><th>备注</th></tr></thead><tbody id="weeklyRows"></tbody></table></div></div>
@@ -86,7 +94,7 @@
           <div class="section-head"><div><h2>数据管理</h2><p>上传 Excel / CSV，无需复制粘贴，也不需要平台 API</p></div></div>
           <div class="upload-grid">
             <section class="panel upload-panel"><div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="选择要导入的 Excel 或 CSV 文件"><div class="upload-icon">↥</div><h3>把报表放进来</h3><p>拖拽文件到这里，或点击选择文件</p><button class="btn btn-primary" id="pickFiles">选择文件</button><small>支持 .xlsx / .xls / .csv / .json · 可一次选多个</small></div><input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.json" multiple hidden><div id="importMessage" class="import-message" aria-live="polite"></div></section>
-            <section class="panel"><div class="panel-header"><div><h3>支持的数据类型</h3><p>按实际业务分开识别</p></div></div><div class="types-list"><div><b>01</b><span><strong>周度汇总 Excel</strong><small>识别“周度区间 / 抖音发布 / 小红书发布”等列</small></span></div><div><b>02</b><span><strong>作品表现 Excel</strong><small>尝试识别标题、日期、播放、互动等列</small></span></div><div><b>03</b><span><strong>成交跟踪 CSV</strong><small>咨询、预约、体验、订单、金额分开记录</small></span></div></div></section>
+            <section class="panel"><div class="panel-header"><div><h3>支持的数据类型</h3><p>按实际业务分开识别</p></div></div><div class="types-list"><div><b>01</b><span><strong>周度汇总 Excel</strong><small>识别“周度区间 / 抖音发布 / 小红书发布”等列</small></span></div><div><b>02</b><span><strong>作品表现 Excel</strong><small>尝试识别标题、日期、播放、互动等列</small></span></div><div><b>03</b><span><strong>平台每日数据 Excel</strong><small>兼容小红书「近30日观看数据」和抖音「短视频全量指标」导出</small></span></div><div><b>04</b><span><strong>成交跟踪 CSV</strong><small>咨询、预约、体验、订单、金额分开记录</small></span></div></div></section>
           </div>
           <section class="panel below-panel"><div class="panel-header"><div><h3>标准模板与备份</h3><p>下次导入更加稳定；跨设备请导出备份</p></div></div><div class="tool-grid">
             <button class="tool-tile" id="downloadContentTemplate"><strong>⬇ 作品明细模板</strong><small>CSV · 标题、播放量、互动数据</small></button>
@@ -97,7 +105,7 @@
           <section class="panel info-panel"><strong>隐私与存储说明</strong><p>这个版本是纯静态网页：选中的 Excel 由当前浏览器解析，不会自动传到 GitHub 或我们的服务器。数据保存在浏览器 localStorage；清理浏览器数据、换设备或无痕模式可能丢失，请定期下载 JSON 备份。公开 GitHub 仓库只应放网页代码，不要上传真实会员资料或营业数据。</p></section>
         </div>
 
-        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.0 <span>·</span> 原始数据口径优先</footer>
+        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.1 <span>·</span> 原始数据口径优先</footer>
       </div>
     </main>
   </div>

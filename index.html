@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#111217" />
   <meta name="description" content="黑箱健身工作室私教运营数据看板。所有表格均在浏览器本地读取，不会上传到服务器。" />
   <title>黑箱健身 · 运营数据看板</title>
-  <link rel="stylesheet" href="styles.css?v=1.1" />
+  <link rel="stylesheet" href="styles.css?v=1.2" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=1.1" defer></script>
+  <script src="app.js?v=1.2" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -28,7 +28,7 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="side-tip"><span class="tip-dot"></span> 数据仅留在当前浏览器</div>
-        <p>V1.0 · 为黑箱私教工作室制作</p>
+        <p>V1.2 · 为黑箱私教工作室制作</p>
       </div>
     </aside>
 
@@ -100,12 +100,13 @@
             <button class="tool-tile" id="downloadContentTemplate"><strong>⬇ 作品明细模板</strong><small>CSV · 标题、播放量、互动数据</small></button>
             <button class="tool-tile" id="downloadSalesTemplate"><strong>⬇ 转化记录模板</strong><small>CSV · 咨询到成交</small></button>
             <button class="tool-tile" id="backupJson"><strong>⬇ 备份当前数据</strong><small>JSON · 方便换手机 / 电脑</small></button>
-            <button class="tool-tile danger" id="resetData"><strong>↻ 恢复演示数据</strong><small>清除本浏览器已导入的数据</small></button>
+            <button class="tool-tile" id="restoreBackup"><strong>↥ 恢复完整备份</strong><small>JSON · 覆盖当前数据与导入记录</small></button><input type="file" id="restoreInput" accept=".json" hidden><button class="tool-tile danger" id="resetData"><strong>↻ 恢复演示数据</strong><small>清除本浏览器已导入的数据</small></button>
           </div></section>
+          <section class="panel below-panel"><div class="panel-header"><div><h3>导入记录管理</h3><p>按文件逐次记录，删除某次导入后会重新计算其余数据</p></div><span class="tag tag-outline">V1.2 新增</span></div><div id="importHistory" aria-live="polite"></div><p class="footnote">删除前建议下载完整 JSON 备份。升级前的数据无法按文件追溯；导入历史只保存在当前浏览器。</p></section>
           <section class="panel info-panel"><strong>隐私与存储说明</strong><p>这个版本是纯静态网页：选中的 Excel 由当前浏览器解析，不会自动传到 GitHub 或我们的服务器。数据保存在浏览器 localStorage；清理浏览器数据、换设备或无痕模式可能丢失，请定期下载 JSON 备份。公开 GitHub 仓库只应放网页代码，不要上传真实会员资料或营业数据。</p></section>
         </div>
 
-        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.1 <span>·</span> 原始数据口径优先</footer>
+        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.2 <span>·</span> 原始数据口径优先</footer>
       </div>
     </main>
   </div>

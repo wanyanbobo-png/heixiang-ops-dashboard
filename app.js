@@ -1,4 +1,4 @@
-/* 黑箱健身运营看板 V1.0 | 无后台、无数据上传 */
+/* 黑箱健身运营看板 V1.2 | 本地可撤销的导入记录 */
 (() => {
   'use strict';
   const KEY = 'blackbox-dashboard-v1';
@@ -37,7 +37,7 @@
   const sum=(arr,key)=>arr.reduce((a,r)=>a+num(r[key]),0);
   const sumTotal=(arr,keys)=>keys.reduce((a,k)=>a+sum(arr,k),0);
   function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.weekly)&&Array.isArray(d.content)&&Array.isArray(d.conversion)){return {...empty(),...d}}}catch{}return demoData()}
-  function persist(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch{toast('浏览器存储空间不足，请先下载 JSON 备份')}}
+  function persist(){try{localStorage.setItem(KEY,JSON.stringify(data));return true}catch{toast('浏览器存储空间不足，操作未保存。请下载 JSON 备份，清理容量后重试');return false}}
   function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3600)}
   function sortPeriod(period){let s=String(period||'');let m=s.match(/(20\d{2})[/-](\d{1,2})[/-](\d{1,2})/);if(m)return +m[1]*10000+(+m[2])*100+(+m[3]);m=s.match(/(\d{1,2})[./](\d{1,2})/);return m?20260000+(+m[1])*100+(+m[2]):0}
   function weeklySorted(){return [...data.weekly].sort((a,b)=>sortPeriod(a.period)-sortPeriod(b.period))}
@@ -48,7 +48,7 @@
   function render(){
     const status=$('datasetStatus');status.textContent=data.demo?'演示数据 · 非真实经营结果':'真实数据 · 本地读取';status.style.color=data.demo?'':'#84d8ab';status.style.background=data.demo?'':'#183027';status.style.borderColor=data.demo?'':'#315b47';
     $('updateStatus').textContent=data.importedAt?'最近导入 '+data.importedAt:'尚未导入真实报表';
-    renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();
+    renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();renderImportHistory();
   }
   function getOverviewTotals(){if(data.summary){const cutoff=num(data.summary.baselineWeekSort)||Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)));const extra=data.weekly.filter(w=>sortPeriod(w.period)>cutoff);return {xhs:num(data.summary.xhs)+sum(extra,'xhs'),douyin:num(data.summary.douyin)+sum(extra,'douyin'),likes:num(data.summary.likes)+sum(extra,'likes'),comments:num(data.summary.comments)+sum(extra,'comments'),saves:num(data.summary.saves)+sum(extra,'saves'),reviews:num(data.summary.reviews)+sum(extra,'reviews'),source:extra.length?'已登记累计 + 后续新增 '+extra.length+' 周（不重复计数）':'已登记累计（按月度汇总，不与周数据累加）'}}return {xhs:sum(data.weekly,'xhs'),douyin:sum(data.weekly,'douyin'),likes:sum(data.weekly,'likes'),comments:sum(data.weekly,'comments'),saves:sum(data.weekly,'saves'),reviews:sum(data.weekly,'reviews'),source:'已导入周报合计（非完整自然月）'}}
   function renderOverview(){const t=getOverviewTotals(), w=weeklySorted(), latest=w[w.length-1], prev=w[w.length-2];
@@ -197,11 +197,102 @@
     if(!result.weekly.length){for(const s of sheets){let rows=sheetArray(s.rows);let idx=rows.findIndex(r=>idxOf(r,['统计区间','周度区间'])>=0&&idxOf(r,['抖音发布'])>=0);if(idx>=0){let m=fieldIndices(rows[idx]);rows.slice(idx+1).forEach(r=>{let p=String(valAt(r,m.period)).trim();if(p&&/\d/.test(p))result.weekly.push({period:p,xhs:num(valAt(r,m.xhs)),douyin:num(valAt(r,m.douyin)),likes:num(valAt(r,m.likes)),comments:num(valAt(r,m.comments)),saves:num(valAt(r,m.saves)),reviews:num(valAt(r,m.reviews)),notes:String(valAt(r,m.notes)).trim()})})}}}
     const aggregate=parsePlatformAggregate(sheets);result.daily=aggregate.daily;result.platformSummary=aggregate.platformSummary;return result}
   function dedupeMerge(current,addition,key){const map=new Map(current.map((r,i)=>[key(r)||'old:'+i,r]));addition.forEach((r,i)=>map.set(key(r)||'new:'+i,r));return [...map.values()]}
-  function mergeData(incoming){if(data.demo){data=empty()}data.weekly=dedupeMerge(data.weekly,incoming.weekly,r=>String(r.period).replace(/\s/g,''));data.content=dedupeMerge(data.content,incoming.content,r=>[r.platform,r.date,r.title].join('|'));data.conversion=dedupeMerge(data.conversion,incoming.conversion,r=>[r.date,r.platform,r.notes].join('|'));data.daily=dedupeMerge(data.daily||[],incoming.daily||[],r=>[r.platform,r.date].join('|'));data.platformSummary={...(data.platformSummary||{}),...(incoming.platformSummary||{})};if(incoming.summary)data.summary={...incoming.summary,baselineWeekSort:Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)))};data.demo=false;data.importedAt=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});persist();render()}
+  // v1.2 导入管理：保存升级前基线，并按导入次序重建数据。
+  // 不会把早期未留来源的记录伪装成某个文件：它们只能保留在基线中。
+  function coreSnapshot(source){
+    const d=source||empty();
+    return {
+      weekly:JSON.parse(JSON.stringify(Array.isArray(d.weekly)?d.weekly:[])),
+      content:JSON.parse(JSON.stringify(Array.isArray(d.content)?d.content:[])),
+      conversion:JSON.parse(JSON.stringify(Array.isArray(d.conversion)?d.conversion:[])),
+      daily:JSON.parse(JSON.stringify(Array.isArray(d.daily)?d.daily:[])),
+      platformSummary:JSON.parse(JSON.stringify(d.platformSummary||{})),
+      summary:d.summary?JSON.parse(JSON.stringify(d.summary)):null,
+      demo:Boolean(d.demo), importedAt:String(d.importedAt||'')
+    };
+  }
+  function eventPayload(source){
+    return {
+      weekly:JSON.parse(JSON.stringify(source.weekly||[])),
+      content:JSON.parse(JSON.stringify(source.content||[])),
+      conversion:JSON.parse(JSON.stringify(source.conversion||[])),
+      daily:JSON.parse(JSON.stringify(source.daily||[])),
+      platformSummary:JSON.parse(JSON.stringify(source.platformSummary||{})),
+      summary:source.summary?JSON.parse(JSON.stringify(source.summary)):null
+    };
+  }
+  function applyEvent(state, evt){
+    const incoming=evt.payload;
+    if(state.demo)state=coreSnapshot(empty());
+    state.weekly=dedupeMerge(state.weekly,incoming.weekly||[],r=>String(r.period).replace(/\s/g,''));
+    state.content=dedupeMerge(state.content,incoming.content||[],r=>[r.platform,r.date,r.title].join('|'));
+    state.conversion=dedupeMerge(state.conversion,incoming.conversion||[],r=>[r.date,r.platform,r.notes].join('|'));
+    state.daily=dedupeMerge(state.daily,incoming.daily||[],r=>[r.platform,r.date].join('|'));
+    state.platformSummary={...state.platformSummary,...(incoming.platformSummary||{})};
+    if(incoming.summary)state.summary={...incoming.summary,baselineWeekSort:Math.max(0,...state.weekly.map(w=>sortPeriod(w.period)))};
+    state.demo=false;
+    state.importedAt=evt.shortTime||'';
+    return state;
+  }
+  function rebuildEvents(baseline,events){
+    return events.reduce((state,evt)=>applyEvent(state,evt),coreSnapshot(baseline));
+  }
+  function saveNewState(next){
+    const previous=data;
+    data=next;
+    if(!persist()){data=previous;return false}
+    render();
+    return true;
+  }
+  function recordImport(incoming,fileName,kind='file'){
+    const baseline=data.importBase?data.importBase:coreSnapshot(data);
+    const events=Array.isArray(data.importEvents)?data.importEvents:[];
+    const now=new Date();
+    const entry={
+      id:now.getTime().toString(36)+'-'+Math.random().toString(36).slice(2,9),
+      filename:String(fileName||'未命名文件'),kind,
+      time:now.toLocaleString('zh-CN',{hour12:false}),
+      shortTime:now.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}),
+      payload:eventPayload(incoming)
+    };
+    const updated=[...events,entry];
+    const rebuilt=rebuildEvents(baseline,updated);
+    return saveNewState({...rebuilt,importBase:baseline,importEvents:updated,historyVersion:1});
+  }
+  function removeImport(id){
+    const events=Array.isArray(data.importEvents)?data.importEvents:[];
+    const target=events.find(e=>e.id===id);
+    if(!target)return;
+    if(!confirm('确定撤销「'+target.filename+'」这次导入？\n其他导入批次和升级前的数据会保留。建议先导出 JSON 备份。'))return;
+    const updated=events.filter(e=>e.id!==id);
+    const baseline=data.importBase||coreSnapshot(data);
+    const rebuilt=rebuildEvents(baseline,updated);
+    if(saveNewState({...rebuilt,importBase:baseline,importEvents:updated,historyVersion:1})){
+      $('importMessage').textContent='已撤销：'+target.filename+'；其他已登记数据保留。';
+      toast('已撤销这次导入');
+    }
+  }
+  function renderImportHistory(){
+    const el=$('importHistory');
+    if(!el)return;
+    const events=Array.isArray(data.importEvents)?data.importEvents:[];
+    const old=data.importBase||(!data.demo?data:null);
+    const legacyInfo=old&&!old.demo&&(old.weekly?.length||old.content?.length||old.conversion?.length||old.daily?.length||old.summary)?
+      '<div class="legacy-info"><strong>升级前保留的数据</strong><small>包含之前导入的周报及其他数据。升级前未保存来源，无法可靠地单独删除其中某个文件；新导入记录可以单独撤销。</small></div>':'';
+    if(!events.length){el.innerHTML=legacyInfo+emptyHtml('还没有升级后可管理的导入记录。新导入的 Excel / CSV 会自动在这里登记，可单独删除。');return}
+    const counts=payload=>{
+      const c=[['周报',payload.weekly?.length||0],['作品',payload.content?.length||0],['每日趋势',payload.daily?.length||0],['转化',payload.conversion?.length||0]];
+      if(payload.summary)c.push(['累计汇总',1]);
+      return c.filter(([,n])=>n>0).map(([label,n])=>label+' '+n).join(' · ')||'已更新汇总';
+    };
+    el.innerHTML=legacyInfo+'<div class="import-items">'+[...events].reverse().map(evt=>
+      '<div class="import-entry"><div class="import-description"><strong title="'+esc(evt.filename)+'">'+esc(evt.filename)+'</strong><small>'+esc(evt.time)+' · '+esc(counts(evt.payload||{}))+'</small></div><button type="button" class="btn btn-small remove-import" data-import-id="'+esc(evt.id)+'">删除这次导入</button></div>'
+    ).join('')+'</div>';
+  }
   async function parseFile(file){if(file.size>20*1024*1024)throw new Error('文件超过 20MB，请先导出精简版');let name=file.name.toLowerCase();if(name.endsWith('.json')){let json=JSON.parse(await file.text());if(!Array.isArray(json.weekly)||!Array.isArray(json.content)||!Array.isArray(json.conversion))throw new Error('JSON 结构不符合本项目备份格式');return {weekly:json.weekly,content:json.content,conversion:json.conversion,daily:json.daily||[],platformSummary:json.platformSummary||{},summary:json.summary||null}}
     if(name.endsWith('.csv')){const text=(await file.text()).replace(/^\ufeff/,'');return processSheets([{name:file.name,rows:splitCSV(text)}],file.name)}
     if(name.endsWith('.xlsx')||name.endsWith('.xls')){if(!window.XLSX)throw new Error('Excel 解析组件未加载。请联网重试，或在 WPS/Excel 中另存为 CSV 导入');const buf=await file.arrayBuffer();let wb=window.XLSX.read(buf,{type:'array',cellDates:false,raw:true});let sheets=wb.SheetNames.map(s=>({name:s,rows:window.XLSX.utils.sheet_to_json(wb.Sheets[s],{header:1,defval:'',raw:true,blankrows:false})}));return processSheets(sheets,file.name)}throw new Error('仅支持 .xlsx / .xls / .csv / .json')}
-  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}mergeData(r);reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
+  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}if(!recordImport(r,f.name))throw new Error('浏览器储存不足，本次文件未保存');reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
   function saveText(filename,content,type='text/plain;charset=utf-8'){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);let a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),6000)}
   function csvOut(rows){return '\ufeff'+rows.map(r=>r.map(v=>{let s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}).join(',')).join('\r\n')}
   function setup(){
@@ -221,12 +312,30 @@
     $('openWeekForm').addEventListener('click',()=>$('weekDialog').showModal());
     $('closeWeekForm').addEventListener('click',()=>$('weekDialog').close());
     $('cancelWeekForm').addEventListener('click',()=>$('weekDialog').close());
-    $('weekForm').addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.currentTarget),w={period:String(f.get('period')).trim(),xhs:num(f.get('xhs')),douyin:num(f.get('douyin')),likes:num(f.get('likes')),comments:num(f.get('comments')),saves:num(f.get('saves')),reviews:num(f.get('reviews')),notes:String(f.get('notes')||'').trim()};if(!w.period){toast('请填写统计区间');return}mergeData({weekly:[w],content:[],conversion:[],summary:null});e.currentTarget.reset();$('weekDialog').close();toast('已保存周报记录')});
+    $('weekForm').addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.currentTarget),w={period:String(f.get('period')).trim(),xhs:num(f.get('xhs')),douyin:num(f.get('douyin')),likes:num(f.get('likes')),comments:num(f.get('comments')),saves:num(f.get('saves')),reviews:num(f.get('reviews')),notes:String(f.get('notes')||'').trim()};if(!w.period){toast('请填写统计区间');return}if(recordImport({weekly:[w],content:[],conversion:[],daily:[],platformSummary:{},summary:null},'手动周报：'+w.period,'manual')){e.currentTarget.reset();$('weekDialog').close();toast('已保存周报记录')}});
     $('downloadContentTemplate').addEventListener('click',()=>saveText('作品明细模板.csv',csvOut([['发布日期','平台','作品标题','播放量','点赞量','评论量','收藏量','分享量','选题'],['2026-11-10','抖音','示例：深蹲训练记录',500,10,2,3,1,'训练记录']]),'text/csv;charset=utf-8'));
     $('downloadSalesTemplate').addEventListener('click',()=>saveText('转化记录模板.csv',csvOut([['日期','平台','咨询人数','预约人数','到店体验人数','成交订单数','成交金额','备注'],['2026-11-10','美团/点评',2,1,1,1,648,'示例行，请删除并填写真实数据']]),'text/csv;charset=utf-8'));
     $('exportWeekCsv').addEventListener('click',()=>saveText('黑箱健身周报记录.csv',csvOut([['周度区间','小红书发布','抖音发布','点赞量','评论量','收藏量','美团/点评好评','备注'],...weeklySorted().map(r=>[r.period,r.xhs,r.douyin,r.likes,r.comments,r.saves,r.reviews,r.notes])]),'text/csv;charset=utf-8'));
-    $('backupJson').addEventListener('click',()=>{saveText('黑箱运营看板备份.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');toast('已生成数据备份，请妥善保存')});
-    $('resetData').addEventListener('click',()=>{if(confirm('确定清除当前浏览器的真实数据并恢复演示数据？建议先下载 JSON 备份。')){data=demoData();persist();render();$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}});
+    $('backupJson').addEventListener('click',()=>{saveText('黑箱运营看板备份.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');toast('已生成完整数据备份（包含导入记录），请妥善保存')});
+    $('resetData').addEventListener('click',()=>{if(confirm('确定清除当前浏览器的真实数据、所有导入历史并恢复演示数据？建议先下载 JSON 备份。')){if(saveNewState(demoData())){$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}}});
+    $('importHistory').addEventListener('click',e=>{const btn=e.target.closest('.remove-import');if(btn)removeImport(btn.dataset.importId)});
+    $('restoreBackup').addEventListener('click',()=> $('restoreInput').click());
+    $('restoreInput').addEventListener('change',async e=>{
+      const file=e.target.files?.[0];e.target.value='';if(!file)return;
+      try{
+        if(file.size>20*1024*1024)throw new Error('备份文件超过20MB，请使用精简版');
+        const restored=JSON.parse(await file.text());
+        if(!Array.isArray(restored.weekly)||!Array.isArray(restored.content)||!Array.isArray(restored.conversion))throw new Error('不是本看板的完整 JSON 备份');
+        if(restored.importBase&&!Array.isArray(restored.importEvents))throw new Error('导入历史格式异常');
+        if(!confirm('恢复此 JSON 备份会覆盖当前浏览器所有数据与导入记录。确定继续吗？'))return;
+        const next={...empty(),...restored};
+        if(restored.importBase){
+          const rebuilt=rebuildEvents(restored.importBase,restored.importEvents);
+          Object.assign(next,rebuilt);
+        }
+        if(saveNewState(next)){toast('完整备份已恢复');$('importMessage').textContent='已恢复备份：'+file.name}
+      }catch(err){toast('备份恢复失败：'+(err?.message||'文件格式错误'))}
+    });
     let fromHash=location.hash.replace('#','');switchView(titles[fromHash]?fromHash:'overview');
   }
   setup();

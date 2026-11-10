@@ -3,3 +3,16 @@
 
 /* Platform daily trends */
 #view-platform .chart-wrap{min-height:220px}#view-platform .table-scroll{overflow-x:auto}#view-platform .data-table{min-width:900px}
+
+/* V1.2: import ledger entries and safe per-batch deletion */
+.import-items{display:flex;flex-direction:column;gap:10px}
+.import-entry{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 15px;background:#1d1f25;border:1px solid #353840;border-radius:10px}
+.import-description{min-width:0;display:flex;flex-direction:column;gap:6px;overflow:hidden}
+.import-description strong{font-size:13px;overflow-wrap:anywhere;color:#f2f2f4}
+.import-description small{font-size:11px;color:#989da8;line-height:1.6}
+.import-entry .remove-import{border:1px solid #934943;color:#ffb2ac;background:#302324;flex-shrink:0;font-size:11px}
+.import-entry .remove-import:hover{background:#4a2828}
+.legacy-info{background:#282820;border:1px solid #5b5139;border-radius:10px;padding:14px 17px;display:flex;flex-direction:column;gap:7px;margin-bottom:15px}
+.legacy-info strong{font-size:13px;color:#e8d6a9}
+.legacy-info small{font-size:11px;line-height:1.7;color:#c7bb9e}
+@media(max-width:480px){.import-entry{align-items:flex-start;flex-direction:column}.import-entry .remove-import{align-self:flex-end}}

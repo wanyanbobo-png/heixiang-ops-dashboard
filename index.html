@@ -6,9 +6,11 @@
   <meta name="theme-color" content="#111217" />
   <meta name="description" content="黑箱健身工作室私教运营数据看板。所有表格均在浏览器本地读取，不会上传到服务器。" />
   <title>黑箱健身 · 运营数据看板</title>
-  <link rel="stylesheet" href="styles.css?v=1.3" />
+  <link rel="stylesheet" href="styles.css?v=1.4" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=1.3" defer></script>
+  <script src="cloud-config.js" defer></script>
+  <script src="cloud.js" defer></script>
+  <script src="app.js?v=1.4" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -27,7 +29,7 @@
         <button class="nav-item" data-view="manage"><span class="nav-icon">⌘</span> 数据管理</button>
       </nav>
       <div class="sidebar-bottom">
-        <div class="side-tip"><span class="tip-dot"></span> 数据仅留在当前浏览器</div>
+        <div class="side-tip"><span class="tip-dot"></span> 支持本机保存与云同步</div>
         <p>V1.3 · 为黑箱私教工作室制作</p>
       </div>
     </aside>
@@ -118,6 +120,20 @@
             <section class="panel upload-panel"><div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="选择要导入的 Excel 或 CSV 文件"><div class="upload-icon">↥</div><h3>把报表放进来</h3><p>拖拽文件到这里，或点击选择文件</p><button class="btn btn-primary" id="pickFiles">选择文件</button><small>支持 .xlsx / .xls / .csv / .json · 可一次选多个</small></div><input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.json" multiple hidden><div id="importMessage" class="import-message" aria-live="polite"></div></section>
             <section class="panel"><div class="panel-header"><div><h3>支持的数据类型</h3><p>按实际业务分开识别</p></div></div><div class="types-list"><div><b>01</b><span><strong>周度汇总 Excel</strong><small>识别“周度区间 / 抖音发布 / 小红书发布”等列</small></span></div><div><b>02</b><span><strong>作品表现 Excel</strong><small>尝试识别标题、日期、播放、互动等列</small></span></div><div><b>03</b><span><strong>平台每日数据 Excel</strong><small>兼容小红书「近30日观看数据」和抖音「短视频全量指标」导出</small></span></div><div><b>04</b><span><strong>成交跟踪 CSV</strong><small>咨询、预约、体验、订单、金额分开记录</small></span></div></div></section>
           </div>
+          <section class="panel below-panel" aria-labelledby="cloudTitle">
+            <div class="panel-header"><div><h3 id="cloudTitle">云同步</h3><p id="cloudStatus" aria-live="polite">正在检查云同步设置</p></div></div>
+            <form id="cloudLogin" class="tool-grid" hidden>
+              <label>邮箱 <input name="email" type="email" autocomplete="username" required /></label>
+              <label>密码 <input name="password" type="password" autocomplete="current-password" required /></label>
+              <button class="btn btn-primary">登录云看板</button>
+            </form>
+            <div id="cloudActions" class="tool-grid" hidden>
+              <button class="btn" id="cloudRefresh">刷新云端</button>
+              <button class="btn" id="cloudSeed" hidden>复制本机数据到空白云看板</button>
+              <button class="btn" id="cloudLogout">退出云看板</button>
+            </div>
+            <p class="footnote">使用同一账号登录手机和电脑。连接后，导入和撤销会同步到私有云看板，本机原有记录单独保留。</p>
+          </section>
           <section class="panel below-panel"><div class="panel-header"><div><h3>标准模板与备份</h3><p>下次导入更加稳定；跨设备请导出备份</p></div></div><div class="tool-grid">
             <button class="tool-tile" id="downloadContentTemplate"><strong>⬇ 作品明细模板</strong><small>CSV · 标题、播放量、互动数据</small></button>
             <button class="tool-tile" id="downloadSalesTemplate"><strong>⬇ 转化记录模板</strong><small>CSV · 咨询到成交</small></button>
@@ -125,7 +141,7 @@
             <button class="tool-tile" id="restoreBackup"><strong>↥ 恢复完整备份</strong><small>JSON · 覆盖当前数据与导入记录</small></button><input type="file" id="restoreInput" accept=".json" hidden><button class="tool-tile danger" id="resetData"><strong>↻ 恢复演示数据</strong><small>清除本浏览器已导入的数据</small></button>
           </div></section>
           <section class="panel below-panel"><div class="panel-header"><div><h3>导入记录管理</h3><p>按文件逐次记录，删除某次导入后会重新计算其余数据</p></div><span class="tag tag-outline">V1.2 新增</span></div><div id="importHistory" aria-live="polite"></div><p class="footnote">删除前建议下载完整 JSON 备份。升级前的数据无法按文件追溯；导入历史只保存在当前浏览器。</p></section>
-          <section class="panel info-panel"><strong>隐私与存储说明</strong><p>这个版本是纯静态网页：选中的 Excel 由当前浏览器解析，不会自动传到 GitHub 或我们的服务器。数据保存在浏览器 localStorage；清理浏览器数据、换设备或无痕模式可能丢失，请定期下载 JSON 备份。公开 GitHub 仓库只应放网页代码，不要上传真实会员资料或营业数据。</p></section>
+          <section class="panel info-panel"><strong>隐私与存储说明</strong><p>Excel 由浏览器解析。本机模式只保存到当前浏览器；登录云看板后，解析后的数据和导入记录保存到该账号的私有数据库。请定期下载 JSON 备份。</p></section>
         </div>
 
         <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.3 <span>·</span> 原始数据口径优先</footer>

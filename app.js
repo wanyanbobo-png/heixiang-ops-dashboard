@@ -313,7 +313,122 @@
   function rebuildEvents(baseline,events){
     return events.reduce((state,evt)=>applyEvent(state,evt),coreSnapshot(baseline));
   }
-  function saveNewState(next){
+  const cloud = window.dashboardCloud;
+  let cloudUser = null;
+  let cloudRevision = null;
+  let cloudBusy = false;
+  let cloudMode = 0;
+
+  function validSnapshot(value) {
+    return value && ['weekly', 'content', 'conversion'].every(key => Array.isArray(value[key]));
+  }
+
+  function cloudStatus(message) {
+    $('cloudStatus').textContent = message;
+    $('cloudLogin').hidden = Boolean(cloudUser) || !cloud;
+    $('cloudActions').hidden = !cloudUser;
+    $('cloudSeed').hidden = !cloudUser || cloudRevision !== null || load().demo;
+    $('resetData').disabled = Boolean(cloudUser);
+  }
+
+  async function cloudOperation(operation, onError) {
+    if (cloudBusy) return false;
+    cloudBusy = true;
+    try {
+      await operation();
+      return true;
+    } catch {
+      cloudStatus(onError);
+      return false;
+    } finally {
+      cloudBusy = false;
+    }
+  }
+
+  async function readCloud(user) {
+    const row = await cloud.read(user.id);
+    if (row && !validSnapshot(row.snapshot)) throw new Error('Invalid cloud snapshot');
+    return row;
+  }
+
+  function showCloud(user, row) {
+    if (cloudUser?.id !== user.id) cloudMode++;
+    cloudUser = user;
+    cloudRevision = row?.revision ?? null;
+    data = row ? {...empty(), ...row.snapshot} : empty();
+    $('importMessage').textContent = '';
+    render();
+    cloudStatus(row ? '已连接云看板，登录同一账号即可在其他设备查看。' : '已连接空白云看板。可导入报表，或将本机数据复制到云端。');
+  }
+
+  async function refreshCloud() {
+    if (!cloudUser || document.hidden) return;
+    await cloudOperation(async () => {
+      const row = await readCloud(cloudUser);
+      if ((row?.revision ?? null) !== cloudRevision) showCloud(cloudUser, row);
+    }, '暂时无法读取云端，当前显示的是上次成功读取的数据。');
+  }
+
+  function setupCloud() {
+    if (!cloud) {
+      cloudStatus('云数据库尚未配置，当前数据保存在本浏览器。');
+      return;
+    }
+    cloudStatus('本机看板。登录后可使用云同步。');
+    $('cloudLogin').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const fields = new FormData(form);
+      await cloudOperation(async () => {
+        const session = await cloud.signIn(String(fields.get('email')).trim(), String(fields.get('password')));
+        showCloud(session.user, await readCloud(session.user));
+      }, '云端登录或读取失败，请检查账号和云服务设置后重试。');
+      form.elements.password.value = '';
+    });
+    $('cloudRefresh').addEventListener('click', refreshCloud);
+    $('cloudLogout').addEventListener('click', () => cloudOperation(async () => {
+      await cloud.signOut();
+      cloudMode++;
+      cloudUser = null;
+      cloudRevision = null;
+      data = load();
+      $('importMessage').textContent = '';
+      render();
+      cloudStatus('已退出云看板，当前显示本机数据。');
+    }, '退出失败，请重试。'));
+    $('cloudSeed').addEventListener('click', async () => {
+      if (!cloudUser || cloudRevision !== null) return;
+      const local = load();
+      if (local.demo || !confirm('将本机真实记录和导入历史复制到当前账号的空白云看板？')) return;
+      if (await saveNewState(local)) toast('本机数据已复制到云端');
+    });
+    document.addEventListener('visibilitychange', refreshCloud);
+    window.setInterval(refreshCloud, 30000);
+    return cloudOperation(async () => {
+      const session = await cloud.session();
+      if (session) showCloud(session.user, await readCloud(session.user));
+    }, '无法连接云端，可重试登录。当前显示本机数据。');
+  }
+
+  async function saveNewState(next){
+    if (cloudBusy) {
+      toast('正在连接云端，请稍后再试');
+      return false;
+    }
+    if (cloudUser) {
+      let saved = false;
+      await cloudOperation(async () => {
+        const row = await cloud.write(cloudUser.id, cloudRevision, next);
+        if (!row) {
+          showCloud(cloudUser, await readCloud(cloudUser));
+          toast('另一台设备已更新数据，本次更改未提交，请重新操作');
+          return;
+        }
+        showCloud(cloudUser, {...row, snapshot: next});
+        saved = true;
+      }, '云端写入未能确认。请刷新云端并核对导入记录后再试。');
+      return saved;
+    }
     const previous=data;
     data=next;
     if(!persist()){data=previous;return false}
@@ -335,7 +450,7 @@
     const rebuilt=rebuildEvents(baseline,updated);
     return saveNewState({...rebuilt,importBase:baseline,importEvents:updated,historyVersion:1});
   }
-  function removeImport(id){
+  async function removeImport(id){
     const events=Array.isArray(data.importEvents)?data.importEvents:[];
     const target=events.find(e=>e.id===id);
     if(!target)return;
@@ -343,7 +458,7 @@
     const updated=events.filter(e=>e.id!==id);
     const baseline=data.importBase||coreSnapshot(data);
     const rebuilt=rebuildEvents(baseline,updated);
-    if(saveNewState({...rebuilt,importBase:baseline,importEvents:updated,historyVersion:1})){
+    if(await saveNewState({...rebuilt,importBase:baseline,importEvents:updated,historyVersion:1})){
       $('importMessage').textContent='已撤销：'+target.filename+'；其他已登记数据保留。';
       toast('已撤销这次导入');
     }
@@ -368,7 +483,7 @@
   async function parseFile(file){if(file.size>20*1024*1024)throw new Error('文件超过 20MB，请先导出精简版');let name=file.name.toLowerCase();if(name.endsWith('.json')){let json=JSON.parse(await file.text());if(!Array.isArray(json.weekly)||!Array.isArray(json.content)||!Array.isArray(json.conversion))throw new Error('JSON 结构不符合本项目备份格式');return {weekly:json.weekly,content:json.content,conversion:json.conversion,daily:json.daily||[],platformSummary:json.platformSummary||{},summary:json.summary||null}}
     if(name.endsWith('.csv')){const text=(await file.text()).replace(/^\ufeff/,'');return processSheets([{name:file.name,rows:splitCSV(text)}],file.name)}
     if(name.endsWith('.xlsx')||name.endsWith('.xls')){if(!window.XLSX)throw new Error('Excel 解析组件未加载。请联网重试，或在 WPS/Excel 中另存为 CSV 导入');const buf=await file.arrayBuffer();let wb=window.XLSX.read(buf,{type:'array',cellDates:false,raw:true});let sheets=wb.SheetNames.map(s=>({name:s,rows:window.XLSX.utils.sheet_to_json(wb.Sheets[s],{header:1,defval:'',raw:true,blankrows:false})}));return processSheets(sheets,file.name)}throw new Error('仅支持 .xlsx / .xls / .csv / .json')}
-  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}if(!recordImport(r,f.name))throw new Error('浏览器储存不足，本次文件未保存');reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
+  async function importFiles(files){if(!files||!files.length)return;const mode=cloudMode;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}if(mode!==cloudMode)throw new Error('已切换看板，本次文件未导入');if(!await recordImport(r,f.name))throw new Error('未确认保存，请核对导入记录后重试');reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast(cloudUser?'导入完成，已同步到云看板':'导入完成，已更新本地看板')}
   function saveText(filename,content,type='text/plain;charset=utf-8'){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);let a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),6000)}
   function csvOut(rows){return '\ufeff'+rows.map(r=>r.map(v=>{let s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}).join(',')).join('\r\n')}
   function setup(){
@@ -391,19 +506,22 @@
     $('openWeekForm').addEventListener('click',()=>$('weekDialog').showModal());
     $('closeWeekForm').addEventListener('click',()=>$('weekDialog').close());
     $('cancelWeekForm').addEventListener('click',()=>$('weekDialog').close());
-    $('weekForm').addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.currentTarget),w={period:String(f.get('period')).trim(),xhs:num(f.get('xhs')),douyin:num(f.get('douyin')),likes:num(f.get('likes')),comments:num(f.get('comments')),saves:num(f.get('saves')),reviews:num(f.get('reviews')),notes:String(f.get('notes')||'').trim()};if(!w.period){toast('请填写统计区间');return}if(recordImport({weekly:[w],content:[],conversion:[],daily:[],platformSummary:{},summary:null},'手动周报：'+w.period,'manual')){e.currentTarget.reset();$('weekDialog').close();toast('已保存周报记录')}});
+    $('weekForm').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,f=new FormData(form),w={period:String(f.get('period')).trim(),xhs:num(f.get('xhs')),douyin:num(f.get('douyin')),likes:num(f.get('likes')),comments:num(f.get('comments')),saves:num(f.get('saves')),reviews:num(f.get('reviews')),notes:String(f.get('notes')||'').trim()};if(!w.period){toast('请填写统计区间');return}if(await recordImport({weekly:[w],content:[],conversion:[],daily:[],platformSummary:{},summary:null},'手动周报：'+w.period,'manual')){form.reset();$('weekDialog').close();toast('已保存周报记录')}});
     $('downloadContentTemplate').addEventListener('click',()=>saveText('作品明细模板.csv',csvOut([['发布日期','平台','作品标题','播放量','点赞量','评论量','收藏量','分享量','选题'],['2026-11-10','抖音','示例：深蹲训练记录',500,10,2,3,1,'训练记录']]),'text/csv;charset=utf-8'));
     $('downloadSalesTemplate').addEventListener('click',()=>saveText('转化记录模板.csv',csvOut([['日期','平台','咨询人数','预约人数','到店体验人数','成交订单数','成交金额','备注'],['2026-11-10','美团/点评',2,1,1,1,648,'示例行，请删除并填写真实数据']]),'text/csv;charset=utf-8'));
     $('exportWeekCsv').addEventListener('click',()=>saveText('黑箱健身周报记录.csv',csvOut([['周度区间','小红书发布','抖音发布','点赞量','评论量','收藏量','美团/点评好评','备注'],...weeklySorted().map(r=>[r.period,r.xhs,r.douyin,r.likes,r.comments,r.saves,r.reviews,r.notes])]),'text/csv;charset=utf-8'));
     $('backupJson').addEventListener('click',()=>{saveText('黑箱运营看板备份.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');toast('已生成完整数据备份（包含导入记录），请妥善保存')});
-    $('resetData').addEventListener('click',()=>{if(confirm('确定清除当前浏览器的真实数据、所有导入历史并恢复演示数据？建议先下载 JSON 备份。')){if(saveNewState(demoData())){$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}}});
+    $('resetData').addEventListener('click',async()=>{if(cloudUser)return;if(confirm('确定清除当前浏览器的真实数据、所有导入历史并恢复演示数据？建议先下载 JSON 备份。')){if(await saveNewState(demoData())){$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}}});
     $('importHistory').addEventListener('click',e=>{const btn=e.target.closest('.remove-import');if(btn)removeImport(btn.dataset.importId)});
     $('restoreBackup').addEventListener('click',()=> $('restoreInput').click());
     $('restoreInput').addEventListener('change',async e=>{
       const file=e.target.files?.[0];e.target.value='';if(!file)return;
       try{
         if(file.size>20*1024*1024)throw new Error('备份文件超过20MB，请使用精简版');
+        const mode=cloudMode;
         const restored=JSON.parse(await file.text());
+        if(mode!==cloudMode)throw new Error('已切换看板，请重新选择备份');
+        if(cloudUser&&cloudRevision!==null)throw new Error('请通过报表追加数据。完整备份只能恢复到空白云看板');
         if(!Array.isArray(restored.weekly)||!Array.isArray(restored.content)||!Array.isArray(restored.conversion))throw new Error('不是本看板的完整 JSON 备份');
         if(restored.importBase&&!Array.isArray(restored.importEvents))throw new Error('导入历史格式异常');
         if(!confirm('恢复此 JSON 备份会覆盖当前浏览器所有数据与导入记录。确定继续吗？'))return;
@@ -412,10 +530,11 @@
           const rebuilt=rebuildEvents(restored.importBase,restored.importEvents);
           Object.assign(next,rebuilt);
         }
-        if(saveNewState(next)){toast('完整备份已恢复');$('importMessage').textContent='已恢复备份：'+file.name}
+        if(await saveNewState(next)){toast('完整备份已恢复');$('importMessage').textContent='已恢复备份：'+file.name}
       }catch(err){toast('备份恢复失败：'+(err?.message||'文件格式错误'))}
     });
     let fromHash=location.hash.replace('#','');switchView(titles[fromHash]?fromHash:'overview');
   }
   setup();
+  setupCloud();
 })();

@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#111217" />
   <meta name="description" content="黑箱健身工作室私教运营数据看板。所有表格均在浏览器本地读取，不会上传到服务器。" />
   <title>黑箱健身 · 运营数据看板</title>
-  <link rel="stylesheet" href="styles.css?v=1.2" />
+  <link rel="stylesheet" href="styles.css?v=1.3" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-  <script src="app.js?v=1.2" defer></script>
+  <script src="app.js?v=1.3" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -28,7 +28,7 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="side-tip"><span class="tip-dot"></span> 数据仅留在当前浏览器</div>
-        <p>V1.2 · 为黑箱私教工作室制作</p>
+        <p>V1.3 · 为黑箱私教工作室制作</p>
       </div>
     </aside>
 
@@ -50,11 +50,33 @@
           <div class="hero-right"><span class="tag" id="datasetStatus">演示数据 · 非真实经营结果</span><span class="tag tag-outline" id="updateStatus">未导入</span></div>
         </section>
 
+
+        <section class="range-panel" aria-label="数据时间范围筛选">
+          <div class="range-heading"><div><strong>查看时间范围</strong><small>切换仅改变展示，不影响已导入的数据</small></div>
+            <select id="rangePreset" class="select" aria-label="时间范围">
+              <option value="all">全部历史</option>
+              <option value="7d">近7天</option>
+              <option value="30d">近30天</option>
+              <option value="90d">近90天</option>
+              <option value="month">本月</option>
+              <option value="lastMonth">上月</option>
+              <option value="custom">自定义日期</option>
+            </select>
+          </div>
+          <div id="customRange" class="custom-range" hidden>
+            <label>开始日期 <input type="date" id="rangeStart" autocomplete="off"></label>
+            <label>结束日期 <input type="date" id="rangeEnd" autocomplete="off"></label>
+            <button type="button" class="btn btn-primary" id="applyRange">应用筛选</button>
+          </div>
+          <div class="range-status" id="rangeStatus" aria-live="polite">显示已导入的全部历史记录</div>
+          <p class="range-explain" id="rangeExplain">平台趋势按数据发生日期；作品按发布日期（播放量为截至导出时的累计值）；周报按有交集的整周统计，无法精确拆分到每天。</p>
+        </section>
+
         <div id="view-overview" class="view active">
-          <div class="section-head"><div><h2>核心指标</h2><p>历史已登记汇总与最近一周表现</p></div><span class="subtle" id="overviewScope">统计范围：演示数据</span></div>
+          <div class="section-head"><div><h2>核心指标</h2><p>历史累计或筛选区间内的已登记周度数据</p></div><span class="subtle" id="overviewScope">统计范围：演示数据</span></div>
           <div class="metric-grid" id="metricGrid"></div>
           <div class="panel-grid">
-            <section class="panel panel-wide"><div class="panel-header"><div><h3>每周发布与互动趋势</h3><p>不将美团/点评好评混入内容发布量</p></div><div class="legend"><span><i class="legend-red"></i>发布</span><span><i class="legend-blue"></i>互动</span></div></div><div id="weeklyChart" class="chart-wrap"></div></section>
+            <section class="panel panel-wide"><div class="panel-header"><div><h3>每周发布与互动趋势</h3><p>周度发布与互动（日期边界按整周统计）</p></div><div class="legend"><span><i class="legend-red"></i>发布</span><span><i class="legend-blue"></i>互动</span></div></div><div id="weeklyChart" class="chart-wrap"></div></section>
             <section class="panel"><div class="panel-header"><div><h3>内容平台发布占比</h3><p>抖音 / 小红书</p></div></div><div id="channelChart" class="donut-block"></div></section>
           </div>
           <div class="panel-grid below-grid">
@@ -67,7 +89,7 @@
           <div class="section-head"><div><h2>单条作品分析</h2><p>找出真正带来播放与互动的选题</p></div><select id="contentPlatform" class="select"><option value="all">全部平台</option><option value="抖音">抖音</option><option value="小红书">小红书</option></select></div>
           <div class="metric-grid compact" id="contentMetrics"></div>
           <section class="panel"><div class="panel-header"><div><h3>作品排行榜</h3><p>可以点击表头切换排序，查看高播放和高互动内容</p></div><span class="tag tag-outline" id="contentCount"></span></div><div class="table-scroll"><table class="data-table"><thead><tr><th>作品 / 选题</th><th>平台</th><th><button class="sort" data-sort="date">发布日期 ↕</button></th><th><button class="sort" data-sort="views">播放/阅读 ↕</button></th><th><button class="sort" data-sort="likes">点赞 ↕</button></th><th>评论</th><th>收藏</th><th><button class="sort" data-sort="rate">互动率 ↕</button></th></tr></thead><tbody id="contentRows"></tbody></table></div></section>
-          <p class="footnote">互动率 =（点赞＋评论＋收藏）÷ 播放/阅读量。仅对有播放量的作品计算；不同平台定义可能不同，请结合各平台后台口径使用。</p>
+          <p class="footnote">互动率 =（点赞＋评论＋收藏）÷ 播放/阅读量。日期只筛选作品的发布日期；播放及互动是截至导出时的累计数据，不代表筛选时段内实际产生的播放或互动。</p>
         </div>
 
         <div id="view-platform" class="view">
@@ -79,14 +101,14 @@
 
         <div id="view-weekly" class="view">
           <div class="section-head"><div><h2>周度运营记录</h2><p>把每周交给老板的记录变成可比较的数据</p></div><button class="btn btn-secondary" id="openWeekForm">＋ 手动添加一周</button></div>
-          <div class="panel"><div class="panel-header"><div><h3>周度明细</h3><p>按登记表原有口径汇总</p></div><button class="btn btn-small" id="exportWeekCsv">导出 CSV</button></div><div class="table-scroll"><table class="data-table"><thead><tr><th>统计区间</th><th>小红书发布</th><th>抖音发布</th><th>发布合计</th><th>点赞</th><th>评论</th><th>收藏</th><th>点评好评</th><th>备注</th></tr></thead><tbody id="weeklyRows"></tbody></table></div></div>
+          <div class="panel"><div class="panel-header"><div><h3>周度明细</h3><p>按登记表原有口径汇总；筛选仅影响显示</p></div><button class="btn btn-small" id="exportWeekCsv">导出 CSV</button></div><div class="table-scroll"><table class="data-table"><thead><tr><th>统计区间</th><th>小红书发布</th><th>抖音发布</th><th>发布合计</th><th>点赞</th><th>评论</th><th>收藏</th><th>点评好评</th><th>备注</th></tr></thead><tbody id="weeklyRows"></tbody></table></div></div>
           <div class="panel info-panel"><strong>统计口径</strong><p>发布条数只计抖音与小红书；点评好评单列。若月度汇总与周度记录时间重叠，不相加，避免重复计数。缺失日期显示为“未登记”，不等于经营数据为零。</p></div>
         </div>
 
         <div id="view-conversion" class="view">
           <div class="section-head"><div><h2>咨询与成交追踪</h2><p>从流量到预约、到店体验、付款成交</p></div><span class="tag tag-outline">需要单独导入转化表</span></div>
           <div class="metric-grid compact" id="conversionMetrics"></div>
-          <section class="panel"><div class="panel-header"><div><h3>转化漏斗</h3><p>每一级只使用有记录的真实数据</p></div></div><div id="funnel" class="funnel"></div></section>
+          <section class="panel"><div class="panel-header"><div><h3>转化漏斗</h3><p>按台账记录日期筛选，未登记不等于0人</p></div></div><div id="funnel" class="funnel"></div></section>
           <section class="panel below-panel"><div class="panel-header"><div><h3>转化明细</h3><p>支持运营台账 CSV，避免把一条好评当成一单成交</p></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>日期</th><th>平台</th><th>咨询人数</th><th>预约人数</th><th>体验人数</th><th>成交订单</th><th>成交金额</th><th>备注</th></tr></thead><tbody id="conversionRows"></tbody></table></div></section>
         </div>
 
@@ -106,7 +128,7 @@
           <section class="panel info-panel"><strong>隐私与存储说明</strong><p>这个版本是纯静态网页：选中的 Excel 由当前浏览器解析，不会自动传到 GitHub 或我们的服务器。数据保存在浏览器 localStorage；清理浏览器数据、换设备或无痕模式可能丢失，请定期下载 JSON 备份。公开 GitHub 仓库只应放网页代码，不要上传真实会员资料或营业数据。</p></section>
         </div>
 
-        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.2 <span>·</span> 原始数据口径优先</footer>
+        <footer>BLACKBOX PRIVATE TRAINING <span>·</span> 运营数据看板 V1.3 <span>·</span> 原始数据口径优先</footer>
       </div>
     </main>
   </div>

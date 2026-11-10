@@ -1,4 +1,4 @@
-/* 黑箱健身运营看板 V1.2 | 本地可撤销的导入记录 */
+/* 黑箱健身运营看板 V1.3 | 全局日期筛选，保留历史数据和导入撤销 */
 (() => {
   'use strict';
   const KEY = 'blackbox-dashboard-v1';
@@ -24,6 +24,76 @@
   let contentSort = 'views';
   let contentSortDesc = true;
   let filterPlatform = 'all';
+  // 时间范围只存筛选偏好，不修改原始数据，也不参与 JSON 导出或备份。
+  const RANGE_KEY='blackbox-dashboard-range-v13';
+  const FILTER_MODES=new Set(['all','7d','30d','90d','month','lastMonth','custom']);
+  function readRange(){try{const s=JSON.parse(localStorage.getItem(RANGE_KEY));if(s&&FILTER_MODES.has(s.mode))return s}catch{}return {mode:'all',start:'',end:''}}
+  let timeRange=readRange();
+  if(timeRange.mode==='custom'&&(!/^20\d{2}-\d{2}-\d{2}$/.test(timeRange.start||'')||!/^20\d{2}-\d{2}-\d{2}$/.test(timeRange.end||'')||timeRange.start>timeRange.end))timeRange={mode:'all',start:'',end:''};
+  const ymd=(d)=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+  function shiftedDate(day,delta){let d=new Date(day+'T12:00:00');d.setDate(d.getDate()+delta);return ymd(d)}
+  function visibleRange(){
+    const now=new Date(),today=ymd(now),first=ymd(new Date(now.getFullYear(),now.getMonth(),1));
+    switch(timeRange.mode){
+      case '7d':return {start:shiftedDate(today,-6),end:today};
+      case '30d':return {start:shiftedDate(today,-29),end:today};
+      case '90d':return {start:shiftedDate(today,-89),end:today};
+      case 'month':return {start:first,end:today};
+      case 'lastMonth':return {start:ymd(new Date(now.getFullYear(),now.getMonth()-1,1)),end:ymd(new Date(now.getFullYear(),now.getMonth(),0))};
+      case 'custom':return {start:timeRange.start,end:timeRange.end};
+      default:return null;
+    }
+  }
+  function dateInScope(v){const range=visibleRange();if(!range)return true;const s=String(v||'').slice(0,10);return /^20\d{2}-\d{2}-\d{2}$/.test(s)&&s>=range.start&&s<=range.end}
+  // 老版周报只记录起止日，不能精确拆分跨月/跨天的一周。
+  function weekBounds(period){
+    const p=String(period||'');const mm=[...p.matchAll(/(?:(20\d{2})[-/.])?(\d{1,2})[-/.](\d{1,2})/g)];
+    if(!mm.length)return null;
+    const year=Number(mm[0][1])||new Date().getFullYear();
+    const pad=x=>String(x).padStart(2,'0');
+    const start=`${year}-${pad(mm[0][2])}-${pad(mm[0][3])}`;
+    let end=start;
+    if(mm.length>1){const last=mm[1];let ey=Number(last[1])||year;
+      if(!last[1]&&(Number(last[2])<Number(mm[0][2])))ey++;
+      end=`${ey}-${pad(last[2])}-${pad(last[3])}`;
+    }
+    return {start,end};
+  }
+  function weekInScope(row){const range=visibleRange();if(!range)return true;const b=weekBounds(row.period);return !!b&&b.start<=range.end&&b.end>=range.start}
+  function visibleWeeks(){return weeklySorted().filter(weekInScope)}
+  const scopedContent=()=>data.content.filter(r=>dateInScope(r.date));
+  const scopedConversions=()=>data.conversion.filter(r=>dateInScope(r.date));
+  function renderRange(){
+    const range=visibleRange(),custom=timeRange.mode==='custom';
+    $('rangePreset').value=timeRange.mode;
+    $('customRange').hidden=!custom;
+    $('rangeStatus').textContent=range?'当前查看：'+range.start+' 至 '+range.end:'当前查看：全部历史（以已导入数据为准）';
+    $('rangeExplain').textContent=range?
+      '按日期筛选：平台趋势/转化按发生日期，作品按发布日期（观看是累计值）；周报选出与区间相交的整周，可能含区间外日期，不能当作精确日统计。':
+      '显示已导入的全部历史。平台趋势为每日数据；作品观看量是导出时的累计值；周报累计与账号日报、作品明细不相加。';
+  }
+  function chooseRange(mode){
+    if(mode==='custom'){
+      $('customRange').hidden=false;
+      const now=ymd(new Date());
+      $('rangeStart').value=timeRange.mode==='custom'&&timeRange.start?timeRange.start:'2026-09-01';
+      $('rangeEnd').value=timeRange.mode==='custom'&&timeRange.end?timeRange.end:now;
+      $('rangeStatus').textContent='请选择开始与结束日期，再点击「应用筛选」';
+      return;
+    }
+    timeRange={mode,start:'',end:''};
+    try{localStorage.setItem(RANGE_KEY,JSON.stringify(timeRange))}catch{}
+    render();
+  }
+  function applyCustomRange(){
+    const start=$('rangeStart').value,end=$('rangeEnd').value;
+    if(!start||!end){toast('请选择完整的开始和结束日期');return}
+    if(start>end){toast('开始日期不能晚于结束日期');return}
+    timeRange={mode:'custom',start,end};
+    try{localStorage.setItem(RANGE_KEY,JSON.stringify(timeRange))}catch{}
+    render();
+  }
+
   let toastTimer;
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -48,16 +118,22 @@
   function render(){
     const status=$('datasetStatus');status.textContent=data.demo?'演示数据 · 非真实经营结果':'真实数据 · 本地读取';status.style.color=data.demo?'':'#84d8ab';status.style.background=data.demo?'':'#183027';status.style.borderColor=data.demo?'':'#315b47';
     $('updateStatus').textContent=data.importedAt?'最近导入 '+data.importedAt:'尚未导入真实报表';
-    renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();renderImportHistory();
+    renderRange();renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();renderImportHistory();
   }
-  function getOverviewTotals(){if(data.summary){const cutoff=num(data.summary.baselineWeekSort)||Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)));const extra=data.weekly.filter(w=>sortPeriod(w.period)>cutoff);return {xhs:num(data.summary.xhs)+sum(extra,'xhs'),douyin:num(data.summary.douyin)+sum(extra,'douyin'),likes:num(data.summary.likes)+sum(extra,'likes'),comments:num(data.summary.comments)+sum(extra,'comments'),saves:num(data.summary.saves)+sum(extra,'saves'),reviews:num(data.summary.reviews)+sum(extra,'reviews'),source:extra.length?'已登记累计 + 后续新增 '+extra.length+' 周（不重复计数）':'已登记累计（按月度汇总，不与周数据累加）'}}return {xhs:sum(data.weekly,'xhs'),douyin:sum(data.weekly,'douyin'),likes:sum(data.weekly,'likes'),comments:sum(data.weekly,'comments'),saves:sum(data.weekly,'saves'),reviews:sum(data.weekly,'reviews'),source:'已导入周报合计（非完整自然月）'}}
-  function renderOverview(){const t=getOverviewTotals(), w=weeklySorted(), latest=w[w.length-1], prev=w[w.length-2];
+  function getOverviewTotals(){
+    if(visibleRange()){
+      const rows=visibleWeeks();
+      return {xhs:sum(rows,'xhs'),douyin:sum(rows,'douyin'),likes:sum(rows,'likes'),comments:sum(rows,'comments'),saves:sum(rows,'saves'),reviews:sum(rows,'reviews'),
+        source:'筛选区间与 '+rows.length+' 个已登记整周相交（包含跨界周，不等于严格的日期内总量；未纳入仅有月度累计的记录）'};
+    }
+    if(data.summary){const cutoff=num(data.summary.baselineWeekSort)||Math.max(0,...data.weekly.map(w=>sortPeriod(w.period)));const extra=data.weekly.filter(w=>sortPeriod(w.period)>cutoff);return {xhs:num(data.summary.xhs)+sum(extra,'xhs'),douyin:num(data.summary.douyin)+sum(extra,'douyin'),likes:num(data.summary.likes)+sum(extra,'likes'),comments:num(data.summary.comments)+sum(extra,'comments'),saves:num(data.summary.saves)+sum(extra,'saves'),reviews:num(data.summary.reviews)+sum(extra,'reviews'),source:extra.length?'已登记累计 + 后续新增 '+extra.length+' 周（不重复计数）':'已登记累计（按月度汇总，不与周数据累加）'}}return {xhs:sum(data.weekly,'xhs'),douyin:sum(data.weekly,'douyin'),likes:sum(data.weekly,'likes'),comments:sum(data.weekly,'comments'),saves:sum(data.weekly,'saves'),reviews:sum(data.weekly,'reviews'),source:'已导入周报合计（非完整自然月）'}}
+  function renderOverview(){const t=getOverviewTotals(), w=visibleWeeks(), latest=w[w.length-1], prev=w[w.length-2], filtered=!!visibleRange();
     $('overviewScope').textContent=(data.demo?'演示数据 · ':'')+t.source;
     $('metricGrid').innerHTML=[
-      metric('累计内容发布',nfmt(t.xhs+t.douyin),'抖音 + 小红书，不含点评好评','▤',true),
-      metric('累计互动',nfmt(t.likes+t.comments+t.saves),'点赞 '+nfmt(t.likes)+' · 评论 '+nfmt(t.comments)+' · 收藏 '+nfmt(t.saves),'♡'),
-      metric('美团 / 点评好评',nfmt(t.reviews),'单独统计，不视为付款订单','✦'),
-      metric('最近一周发布',latest?nfmt(num(latest.xhs)+num(latest.douyin)):'—',latest?latest.period:'暂无周度记录','↗')
+      metric(filtered?'区间涉及周发布':'累计内容发布',nfmt(t.xhs+t.douyin),filtered?'相交整周口径，非精确天数':'抖音 + 小红书，不含点评好评','▤',true),
+      metric(filtered?'区间涉及周互动':'累计互动',nfmt(t.likes+t.comments+t.saves),'点赞 '+nfmt(t.likes)+' · 评论 '+nfmt(t.comments)+' · 收藏 '+nfmt(t.saves),'♡'),
+      metric('美团 / 点评好评',nfmt(t.reviews),filtered?'整周统计，边界可能跨月':'单独统计，不视为付款订单','✦'),
+      metric(filtered?'选中范围最后一周':'最近一周发布',latest?nfmt(num(latest.xhs)+num(latest.douyin)):'—',latest?latest.period:'暂无周度记录','↗')
     ].join('');
     renderGraph(w.slice(-7));
     const all=t.xhs+t.douyin;const angle=all?Math.max(0,Math.min(100,t.douyin/all*100)):50;
@@ -65,9 +141,9 @@
     $('recentWeeks').innerHTML=w.length?w.slice(-4).reverse().map(r=>`<div class="mini-week"><div><div class="period">${esc(r.period)}</div><div class="meta">发布 ${nfmt(num(r.xhs)+num(r.douyin))} · 点评好评 ${nfmt(r.reviews)}</div></div><div class="score">${nfmt(num(r.likes)+num(r.comments)+num(r.saves))}<small>总互动</small></div></div>`).join(''):emptyHtml('请导入周报文件');
     const bullets=[];if(latest){bullets.push(`最近登记周 <strong>${esc(latest.period)}</strong> 共发布 <strong>${nfmt(num(latest.xhs)+num(latest.douyin))} 条</strong>，互动 <strong>${nfmt(num(latest.likes)+num(latest.comments)+num(latest.saves))} 次</strong>。`)}
     if(latest&&prev){const diff=num(latest.likes)+num(latest.comments)+num(latest.saves)-num(prev.likes)-num(prev.comments)-num(prev.saves);bullets.push(`与前一登记周相比，互动${diff>0?'增加':diff<0?'减少':'持平'} <strong>${nfmt(Math.abs(diff))} 次</strong>。这只是总量变化，不代表播放率变化。`)}
-    if(data.content.length){const withViews=data.content.filter(r=>num(r.views)>0);if(withViews.length)bullets.push(`已导入 <strong>${withViews.length} 条</strong>有播放/阅读量的作品，可到「作品分析」按播放量排序。`)}else bullets.push('还没有单条作品数据，<strong>无法判断哪些开头或选题更能带来播放</strong>。建议导入作品明细。');
-    if(!data.conversion.length)bullets.push('尚未导入咨询、预约、体验、成交台账，<strong>无法计算成交率</strong>。');
-    if(data.summary)bullets.push('累计数字来自月度汇总；周度趋势来自已登记周报，两者<strong>不再相加</strong>。');
+    if(scopedContent().length){const withViews=scopedContent().filter(r=>num(r.views)>0);if(withViews.length)bullets.push(`已导入 <strong>${withViews.length} 条</strong>有播放/阅读量的作品，可到「作品分析」按播放量排序。`)}else bullets.push('还没有单条作品数据，<strong>无法判断哪些开头或选题更能带来播放</strong>。建议导入作品明细。');
+    if(!scopedConversions().length)bullets.push('尚未导入咨询、预约、体验、成交台账，<strong>无法计算成交率</strong>。');
+    if(data.summary&&!filtered)bullets.push('累计数字来自月度汇总；周度趋势来自已登记周报，两者<strong>不再相加</strong>。');
     $('insights').innerHTML=bullets.map((b,i)=>`<div class="insight"><span class="insight-num">${String(i+1).padStart(2,'0')}</span><p>${b}</p></div>`).join('');
   }
   function renderGraph(rows){if(!rows.length){$('weeklyChart').innerHTML=emptyHtml('暂无周度数据');return}
@@ -83,7 +159,7 @@
     $('weeklyChart').innerHTML=`<svg class="chart-svg" role="img" aria-label="周度发布条数柱状图与互动次数折线图" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${lines}${bars}${line}${dots}${labels}</svg>`;
   }
   function contentRate(r){const v=num(r.views);return v?100*(num(r.likes)+num(r.comments)+num(r.saves))/v:null}
-  function renderContent(){let rows=data.content.filter(r=>filterPlatform==='all'||r.platform===filterPlatform);const haveViews=rows.filter(r=>num(r.views)>0);const allViews=sum(rows,'views');const likes=sum(rows,'likes'),comments=sum(rows,'comments'),saves=sum(rows,'saves');const rate=allViews?100*(likes+comments+saves)/allViews:null;
+  function renderContent(){let rows=scopedContent().filter(r=>filterPlatform==='all'||r.platform===filterPlatform);const haveViews=rows.filter(r=>num(r.views)>0);const allViews=sum(rows,'views');const likes=sum(rows,'likes'),comments=sum(rows,'comments'),saves=sum(rows,'saves');const rate=allViews?100*(likes+comments+saves)/allViews:null;
     $('contentMetrics').innerHTML=[metric('已收录作品',nfmt(rows.length),'只计导入的作品明细','▤',true),metric('总播放 / 阅读',rows.length?nfmt(allViews):'—','与周报统计范围可能不同','▷'),metric('作品总互动',rows.length?nfmt(likes+comments+saves):'—','点赞 + 评论 + 收藏','♡'),metric('按播放量加权互动率',rate==null?'—':rate.toFixed(2)+'%',rate==null?'缺少有效播放量':'互动总和 ÷ 播放总和','↗')].join('');
     let compare=(a,b)=>{let va=contentSort==='rate'?contentRate(a):a[contentSort],vb=contentSort==='rate'?contentRate(b):b[contentSort];if(contentSort==='date'){va=String(va||'');vb=String(vb||'');return contentSortDesc?vb.localeCompare(va):va.localeCompare(vb)}return contentSortDesc?num(vb)-num(va):num(va)-num(vb)};rows=[...rows].sort(compare);
     $('contentCount').textContent=rows.length+' 条作品';
@@ -91,14 +167,14 @@
   }
   function renderPlatform(){
     const platform=$('dailyPlatform').value;
-    const rows=(data.daily||[]).filter(r=>r.platform===platform).sort((a,b)=>a.date.localeCompare(b.date));
-    const summary=(data.platformSummary||{})[platform]||{};
+    const rows=(data.daily||[]).filter(r=>r.platform===platform&&dateInScope(r.date)).sort((a,b)=>a.date.localeCompare(b.date));
+    const summary=visibleRange()?{}:((data.platformSummary||{})[platform]||{});
     const hasData=rows.length>0||Object.keys(summary).length>0;
     const views=summary.views!=null?summary.views:sum(rows,'views');
     const exposures=summary.exposures!=null?summary.exposures:sum(rows,'exposures');
     const average=key=>{const a=rows.map(r=>r[key]).filter(v=>v!=null&&Number.isFinite(Number(v)));return a.length?a.reduce((s,v)=>s+Number(v),0)/a.length:null};
     const pct=n=>n==null?'—':Number(n).toFixed(1)+'%';
-    const cards=platform==='小红书'?[metric('30天观看',hasData?nfmt(views):'—','账号汇总观看','▷',true),metric('30天曝光',hasData?nfmt(exposures):'—','账号汇总曝光','▤'),metric('封面点击率',pct(summary.coverCtr),'账号整体指标','↗'),metric('视频完播率',pct(summary.completion),'账号整体指标','♡')]:[metric('30天播放',hasData?nfmt(views):'—','账号每日播放汇总','▷',true),metric('30天投稿',hasData?nfmt(sum(rows,'posts')):'—','每日投稿累加','▤'),metric('日均5秒完播率',pct(average('completion5')),'每日百分比简单平均','↗'),metric('日均2秒跳出率',pct(average('bounce2')),'每日百分比简单平均','♡')];
+    const cards=platform==='小红书'?[metric('筛选范围观看',hasData?nfmt(views):'—','账号汇总观看','▷',true),metric('筛选范围曝光',hasData?nfmt(exposures):'—','账号汇总曝光','▤'),metric(visibleRange()?'日均封面点击率':'封面点击率',pct(visibleRange()?average('coverCtr'):summary.coverCtr),visibleRange()?'每日百分比简单平均':'账号整体指标','↗'),metric(visibleRange()?'日均视频完播率':'视频完播率',pct(visibleRange()?average('completion'):summary.completion),visibleRange()?'每日百分比简单平均':'账号整体指标','♡')]:[metric('筛选范围播放',hasData?nfmt(views):'—','账号每日播放汇总','▷',true),metric('筛选范围投稿',hasData?nfmt(sum(rows,'posts')):'—','每日投稿累加','▤'),metric('日均5秒完播率',pct(average('completion5')),'每日百分比简单平均','↗'),metric('日均2秒跳出率',pct(average('bounce2')),'每日百分比简单平均','♡')];
     $('platformMetrics').innerHTML=cards.join('');
     $('dailyCount').textContent=rows.length+' 天';
     $('platformPeriod').textContent=rows.length?('已导入 '+rows[0].date+' 至 '+rows[rows.length-1].date+' · '+platform):'尚未导入'+platform+'的每日数据';
@@ -113,8 +189,8 @@
     const fmt=n=>n==null?'—':nfmt(n),rate=n=>n==null?'—':Number(n).toFixed(1)+'%';
     $('platformRows').innerHTML=rows.slice().reverse().map(r=>'<tr><td>'+esc(r.date)+'</td><td>'+fmt(r.views)+'</td><td>'+fmt(r.exposures)+'</td><td>'+fmt(r.posts)+'</td><td>'+fmt(r.likes)+'</td><td>'+rate(r.coverCtr)+'</td><td>'+rate(platform==='小红书'?r.completion:r.completion5)+'</td><td>'+rate(r.bounce2)+'</td><td>'+(r.avgWatchSeconds==null?'—':Number(r.avgWatchSeconds).toFixed(1)+'秒')+'</td></tr>').join('');
   }
-  function renderWeekly(){const rows=weeklySorted().reverse();$('weeklyRows').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.period)}</td><td>${nfmt(r.xhs)}</td><td>${nfmt(r.douyin)}</td><td class="positive">${nfmt(num(r.xhs)+num(r.douyin))}</td><td>${nfmt(r.likes)}</td><td>${nfmt(r.comments)}</td><td>${nfmt(r.saves)}</td><td>${nfmt(r.reviews)}</td><td class="notes" title="${esc(r.notes)}">${esc(r.notes||'—')}</td></tr>`).join(''):`<tr><td colspan="9" class="table-empty">暂无周报记录，请导入 Excel 或手动添加。</td></tr>`}
-  function renderConversion(){let rows=data.conversion;const c=sum(rows,'consults'),a=sum(rows,'appointments'),t=sum(rows,'trials'),o=sum(rows,'orders'),amt=sum(rows,'amount');let has=rows.length>0;
+  function renderWeekly(){const rows=visibleWeeks().reverse();$('weeklyRows').innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.period)}</td><td>${nfmt(r.xhs)}</td><td>${nfmt(r.douyin)}</td><td class="positive">${nfmt(num(r.xhs)+num(r.douyin))}</td><td>${nfmt(r.likes)}</td><td>${nfmt(r.comments)}</td><td>${nfmt(r.saves)}</td><td>${nfmt(r.reviews)}</td><td class="notes" title="${esc(r.notes)}">${esc(r.notes||'—')}</td></tr>`).join(''):`<tr><td colspan="9" class="table-empty">暂无周报记录，请导入 Excel 或手动添加。</td></tr>`}
+  function renderConversion(){let rows=scopedConversions();const c=sum(rows,'consults'),a=sum(rows,'appointments'),t=sum(rows,'trials'),o=sum(rows,'orders'),amt=sum(rows,'amount');let has=rows.length>0;
     $('conversionMetrics').innerHTML=[metric('咨询人数',has?nfmt(c):'—','已导入台账合计','◎',true),metric('到店体验',has?nfmt(t):'—','按台账填写，不从点评推算','◫'),metric('成交订单',has?nfmt(o):'—','付款订单数','▤'),metric('成交金额',has?money(amt):'—','已登记成交额，不代表总营收','¥')].join('');
     if(!has){$('funnel').innerHTML=emptyHtml('尚未导入转化台账。下载「转化记录模板」，记录咨询、预约、体验和成交。')}else{let mx=Math.max(c,a,t,o,1);$('funnel').innerHTML=[['咨询',c],['预约',a],['到店体验',t],['成交订单',o]].map(([label,n])=>`<div class="funnel-row"><div class="funnel-label">${label}</div><div class="funnel-track"><div class="funnel-fill" style="width:${Math.max(n?2:0,n/mx*100)}%"></div></div><div class="funnel-value">${nfmt(n)}</div></div>`).join('')}
     $('conversionRows').innerHTML=has?rows.slice().reverse().map(r=>`<tr><td>${esc(r.date||'—')}</td><td>${esc(r.platform||'—')}</td><td>${nfmt(r.consults)}</td><td>${nfmt(r.appointments)}</td><td>${nfmt(r.trials)}</td><td>${nfmt(r.orders)}</td><td>${money(r.amount)}</td><td class="notes" title="${esc(r.notes)}">${esc(r.notes||'—')}</td></tr>`).join(''):`<tr><td colspan="8" class="table-empty">没有真实成交数据时不展示虚构的转化率。</td></tr>`;
@@ -299,6 +375,9 @@
     $('today').textContent=new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric'});
     document.querySelectorAll('.nav-item').forEach(n=>n.addEventListener('click',()=>switchView(n.dataset.view)));
     $('importTop').addEventListener('click',()=>switchView('manage'));
+    $('rangePreset').addEventListener('change',e=>chooseRange(e.target.value));
+    $('applyRange').addEventListener('click',applyCustomRange);
+    if(timeRange.mode==='custom'){$('rangeStart').value=timeRange.start;$('rangeEnd').value=timeRange.end;}
     $('pickFiles').addEventListener('click',(e)=>{e.stopPropagation();$('fileInput').click()});
     $('uploadZone').addEventListener('click',()=> $('fileInput').click());
     $('uploadZone').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click()}});

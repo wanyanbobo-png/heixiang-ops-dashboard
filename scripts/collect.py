@@ -16,25 +16,32 @@ class CollectionError(Exception):
 
 
 def request(path, params, token=None):
-    # Fixed official host only; no configurable URLs, no redirects with secrets.
+    """Use only the official host; refresh via POST body, video list via GET."""
     from urllib.request import HTTPRedirectHandler, build_opener
     class NoRedirect(HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             raise CollectionError('API_REDIRECT')
+
     headers = {'Accept': 'application/json'}
     if token:
         headers['access-token'] = token
-    req = Request(API + path + '?' + urlencode(params), headers=headers)
+    if path == '/oauth/refresh_token/':
+        # A POST body avoids leaking the refresh token in URL/query logs.
+        headers['Content-Type'] = 'application/x-www-form-urlencoded'
+        req = Request(API + path, data=urlencode(params).encode('utf-8'),
+                      headers=headers, method='POST')
+    else:
+        req = Request(API + path + '?' + urlencode(params),
+                      headers=headers, method='GET')
     with build_opener(NoRedirect).open(req, timeout=30) as response:
         body = response.read(8_000_001)
     if len(body) > 8_000_000:
         raise CollectionError('RESPONSE_TOO_LARGE')
     result = json.loads(body)
     data = result.get('data')
-    if not isinstance(data, dict) or data.get('error_code') != 0:
+    if not isinstance(data, dict) or str(data.get('error_code')) != '0':
         raise CollectionError('API_REJECTED')
     return data
-
 
 def counter(value):
     if type(value) is not int or value < 0 or value > 2**53-1:
@@ -74,9 +81,9 @@ def collect(fetch, env):
     works = {}
     cursor = 0
     seen = set()
-    for _ in range(100):
-        page = fetch('/api/douyin/v1/video/video_list/', {'open_id': env['DOUYIN_OPEN_ID'],
-                     'cursor': cursor, 'count': 20}, token)
+    for page_number in range(4):
+        page = fetch('/video/list/', {'open_id': env['DOUYIN_OPEN_ID'],
+                     'cursor': cursor, 'count': 10}, token)
         if not isinstance(page.get('list'), list):
             raise CollectionError('INVALID_PAGE')
         for item in page['list']:
@@ -84,7 +91,8 @@ def collect(fetch, env):
                 row = project(item)
                 if row:
                     works[row['id']] = row
-        if not page.get('has_more'):
+        # The documented endpoint currently exposes at most four pages.
+        if not page.get('has_more') or page_number == 3:
             return sorted(works.values(), key=lambda r: (r['date'], r['id']))
         cursor = page['cursor']
         if type(cursor) is not int or cursor in seen:

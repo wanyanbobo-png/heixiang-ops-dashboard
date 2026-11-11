@@ -1,0 +1,70 @@
+name: Collect approved public metrics
+on:
+  schedule:
+    - cron: '15 0,8,16 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-metrics
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Collect without exposing raw responses
+        id: collect
+        continue-on-error: true
+        env:
+          DOUYIN_CLIENT_KEY: ${{ secrets.DOUYIN_CLIENT_KEY }}
+          DOUYIN_OPEN_ID: ${{ secrets.DOUYIN_OPEN_ID }}
+          DOUYIN_REFRESH_TOKEN: ${{ secrets.DOUYIN_REFRESH_TOKEN }}
+          DOUYIN_PUBLIC_ITEM_IDS: ${{ secrets.DOUYIN_PUBLIC_ITEM_IDS }}
+          DOUYIN_PUBLICATION_APPROVED: ${{ vars.DOUYIN_PUBLICATION_APPROVED }}
+        run: python scripts/collect.py
+      - name: Validate public contract
+        run: node -e "if(!require('./public-metrics.js').valid(require('./data/platforms.json'))) process.exit(1)"
+      - name: Commit only public snapshot and safe status
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- data/platforms.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update approved public metrics'
+            git push
+          fi
+      - name: Report collection failure after persisting status
+        if: steps.collect.outcome == 'failure'
+        run: exit 1
+  pages:
+    needs: collect
+    if: always() && needs.collect.result != 'cancelled' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Stage only public site assets
+        run: |
+          mkdir -p /tmp/public-site/data
+          cp index.html styles.css app.js public-metrics.js /tmp/public-site/
+          cp data/platforms.json /tmp/public-site/data/
+          cp -- *.csv /tmp/public-site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/public-site
+      - uses: actions/deploy-pages@v4

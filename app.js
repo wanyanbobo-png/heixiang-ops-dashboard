@@ -118,7 +118,7 @@
   function render(){
     const status=$('datasetStatus');status.textContent=data.demo?'演示数据 · 非真实经营结果':'真实数据 · 本地读取';status.style.color=data.demo?'':'#84d8ab';status.style.background=data.demo?'':'#183027';status.style.borderColor=data.demo?'':'#315b47';
     $('updateStatus').textContent=data.importedAt?'最近导入 '+data.importedAt:'尚未导入真实报表';
-    renderRange();renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();renderImportHistory();
+    renderCollection();renderRange();renderOverview();renderContent();renderPlatform();renderWeekly();renderConversion();renderImportHistory();
   }
   function getOverviewTotals(){
     if(visibleRange()){
@@ -313,122 +313,39 @@
   function rebuildEvents(baseline,events){
     return events.reduce((state,evt)=>applyEvent(state,evt),coreSnapshot(baseline));
   }
-  const cloud = window.dashboardCloud;
-  let cloudUser = null;
-  let cloudRevision = null;
-  let cloudBusy = false;
-  let cloudMode = 0;
-
+  let collection = null;
+  let collectionError = '';
+  function renderCollection() {
+    const target = $('collectionStatus');
+    if (!target) return;
+    const names = {douyin:'抖音',xiaohongshu:'小红书',meituan:'美团',dianping:'大众点评'};
+    const displayTime = value => value ? new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour12:false})+'（北京时间）' : '尚无';
+    const states = {ok:'已更新',not_configured:'待授权 / 配置',error:'采集失败',unavailable:'暂不可自动采集'};
+    target.textContent = collectionError || (collection ? Object.entries(names).map(([key,name]) => {
+      const p = collection.platforms[key];
+      const stale = p.lastSuccessAt && Date.now()-Date.parse(p.lastSuccessAt)>48*3600000;
+      return `${name}：${states[p.state] || '未知状态'}${stale?'（数据已超过48小时未更新）':''}｜最后成功：${displayTime(p.lastSuccessAt)}｜最近尝试：${displayTime(p.lastAttemptAt)}｜${p.message || ''}`;
+    }).join('\n') : '正在读取自动采集状态…');
+    const rows = (collection?.platforms.douyin.works || []).filter(r=>dateInScope(r.date));
+    $('autoWorks').textContent = rows.length ? rows.map(r=>`${r.date} · 作品 ${r.id.slice(0,12)} · 点赞 ${r.likes} · 评论 ${r.comments}`).join('\n') : '当前范围暂无已授权公开作品指标。这里不展示演示数据，也不与本机历史报表重复相加。';
+  }
+  async function setupCollection() {
+    try {
+      const response = await fetch('data/platforms.json', {cache:'no-store'});
+      if (!response.ok) throw new Error();
+      const value = await response.json();
+      if (!window.PublicMetrics.valid(value)) throw new Error();
+      collection = value;
+      collectionError = '';
+    } catch {
+      collectionError = '自动采集数据读取失败，请稍后刷新；本机历史数据仍可使用。';
+    }
+    renderCollection();
+  }
   function validSnapshot(value) {
     return value && ['weekly', 'content', 'conversion'].every(key => Array.isArray(value[key]));
   }
-
-  function cloudStatus(message) {
-    $('cloudStatus').textContent = message;
-    $('cloudLogin').hidden = Boolean(cloudUser) || !cloud;
-    $('cloudActions').hidden = !cloudUser;
-    $('cloudSeed').hidden = !cloudUser || cloudRevision !== null || load().demo;
-    $('resetData').disabled = Boolean(cloudUser);
-  }
-
-  async function cloudOperation(operation, onError) {
-    if (cloudBusy) return false;
-    cloudBusy = true;
-    try {
-      await operation();
-      return true;
-    } catch {
-      cloudStatus(onError);
-      return false;
-    } finally {
-      cloudBusy = false;
-    }
-  }
-
-  async function readCloud(user) {
-    const row = await cloud.read(user.id);
-    if (row && !validSnapshot(row.snapshot)) throw new Error('Invalid cloud snapshot');
-    return row;
-  }
-
-  function showCloud(user, row) {
-    if (cloudUser?.id !== user.id) cloudMode++;
-    cloudUser = user;
-    cloudRevision = row?.revision ?? null;
-    data = row ? {...empty(), ...row.snapshot} : empty();
-    $('importMessage').textContent = '';
-    render();
-    cloudStatus(row ? '已连接云看板，登录同一账号即可在其他设备查看。' : '已连接空白云看板。可导入报表，或将本机数据复制到云端。');
-  }
-
-  async function refreshCloud() {
-    if (!cloudUser || document.hidden) return;
-    await cloudOperation(async () => {
-      const row = await readCloud(cloudUser);
-      if ((row?.revision ?? null) !== cloudRevision) showCloud(cloudUser, row);
-    }, '暂时无法读取云端，当前显示的是上次成功读取的数据。');
-  }
-
-  function setupCloud() {
-    if (!cloud) {
-      cloudStatus('云数据库尚未配置，当前数据保存在本浏览器。');
-      return;
-    }
-    cloudStatus('本机看板。登录后可使用云同步。');
-    $('cloudLogin').addEventListener('submit', async event => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const fields = new FormData(form);
-      await cloudOperation(async () => {
-        const session = await cloud.signIn(String(fields.get('email')).trim(), String(fields.get('password')));
-        showCloud(session.user, await readCloud(session.user));
-      }, '云端登录或读取失败，请检查账号和云服务设置后重试。');
-      form.elements.password.value = '';
-    });
-    $('cloudRefresh').addEventListener('click', refreshCloud);
-    $('cloudLogout').addEventListener('click', () => cloudOperation(async () => {
-      await cloud.signOut();
-      cloudMode++;
-      cloudUser = null;
-      cloudRevision = null;
-      data = load();
-      $('importMessage').textContent = '';
-      render();
-      cloudStatus('已退出云看板，当前显示本机数据。');
-    }, '退出失败，请重试。'));
-    $('cloudSeed').addEventListener('click', async () => {
-      if (!cloudUser || cloudRevision !== null) return;
-      const local = load();
-      if (local.demo || !confirm('将本机真实记录和导入历史复制到当前账号的空白云看板？')) return;
-      if (await saveNewState(local)) toast('本机数据已复制到云端');
-    });
-    document.addEventListener('visibilitychange', refreshCloud);
-    window.setInterval(refreshCloud, 30000);
-    return cloudOperation(async () => {
-      const session = await cloud.session();
-      if (session) showCloud(session.user, await readCloud(session.user));
-    }, '无法连接云端，可重试登录。当前显示本机数据。');
-  }
-
   async function saveNewState(next){
-    if (cloudBusy) {
-      toast('正在连接云端，请稍后再试');
-      return false;
-    }
-    if (cloudUser) {
-      let saved = false;
-      await cloudOperation(async () => {
-        const row = await cloud.write(cloudUser.id, cloudRevision, next);
-        if (!row) {
-          showCloud(cloudUser, await readCloud(cloudUser));
-          toast('另一台设备已更新数据，本次更改未提交，请重新操作');
-          return;
-        }
-        showCloud(cloudUser, {...row, snapshot: next});
-        saved = true;
-      }, '云端写入未能确认。请刷新云端并核对导入记录后再试。');
-      return saved;
-    }
     const previous=data;
     data=next;
     if(!persist()){data=previous;return false}
@@ -483,7 +400,7 @@
   async function parseFile(file){if(file.size>20*1024*1024)throw new Error('文件超过 20MB，请先导出精简版');let name=file.name.toLowerCase();if(name.endsWith('.json')){let json=JSON.parse(await file.text());if(!Array.isArray(json.weekly)||!Array.isArray(json.content)||!Array.isArray(json.conversion))throw new Error('JSON 结构不符合本项目备份格式');return {weekly:json.weekly,content:json.content,conversion:json.conversion,daily:json.daily||[],platformSummary:json.platformSummary||{},summary:json.summary||null}}
     if(name.endsWith('.csv')){const text=(await file.text()).replace(/^\ufeff/,'');return processSheets([{name:file.name,rows:splitCSV(text)}],file.name)}
     if(name.endsWith('.xlsx')||name.endsWith('.xls')){if(!window.XLSX)throw new Error('Excel 解析组件未加载。请联网重试，或在 WPS/Excel 中另存为 CSV 导入');const buf=await file.arrayBuffer();let wb=window.XLSX.read(buf,{type:'array',cellDates:false,raw:true});let sheets=wb.SheetNames.map(s=>({name:s,rows:window.XLSX.utils.sheet_to_json(wb.Sheets[s],{header:1,defval:'',raw:true,blankrows:false})}));return processSheets(sheets,file.name)}throw new Error('仅支持 .xlsx / .xls / .csv / .json')}
-  async function importFiles(files){if(!files||!files.length)return;const mode=cloudMode;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}if(mode!==cloudMode)throw new Error('已切换看板，本次文件未导入');if(!await recordImport(r,f.name))throw new Error('未确认保存，请核对导入记录后重试');reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast(cloudUser?'导入完成，已同步到云看板':'导入完成，已更新本地看板')}
+  async function importFiles(files){if(!files||!files.length)return;let reports=[];for(const f of [...files]){try{let r=await parseFile(f),tot=r.weekly.length+r.content.length+r.conversion.length+(r.daily?.length||0)+Object.keys(r.platformSummary||{}).length+(r.summary?1:0);if(tot===0){reports.push('⚠ '+f.name+'：没有识别到可用数据；每日账号报表与作品明细的格式不同，请检查文件');continue}if(!await recordImport(r,f.name))throw new Error('未确认保存，请核对导入记录后重试');reports.push('✓ '+f.name+'：周报 '+r.weekly.length+' 条，作品 '+r.content.length+' 条，转化 '+r.conversion.length+' 条，平台日报 '+(r.daily?.length||0)+' 天'+(r.summary?'，累计汇总已更新':''))}catch(err){reports.push('✕ '+f.name+'：'+(err?.message||'无法读取文件'))}}$('importMessage').textContent=reports.join('\n');if(reports.some(x=>x.startsWith('✓')))toast('导入完成，已更新本地看板')}
   function saveText(filename,content,type='text/plain;charset=utf-8'){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);let a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),6000)}
   function csvOut(rows){return '\ufeff'+rows.map(r=>r.map(v=>{let s=String(v??'');return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}).join(',')).join('\r\n')}
   function setup(){
@@ -511,17 +428,17 @@
     $('downloadSalesTemplate').addEventListener('click',()=>saveText('转化记录模板.csv',csvOut([['日期','平台','咨询人数','预约人数','到店体验人数','成交订单数','成交金额','备注'],['2026-11-10','美团/点评',2,1,1,1,648,'示例行，请删除并填写真实数据']]),'text/csv;charset=utf-8'));
     $('exportWeekCsv').addEventListener('click',()=>saveText('黑箱健身周报记录.csv',csvOut([['周度区间','小红书发布','抖音发布','点赞量','评论量','收藏量','美团/点评好评','备注'],...weeklySorted().map(r=>[r.period,r.xhs,r.douyin,r.likes,r.comments,r.saves,r.reviews,r.notes])]),'text/csv;charset=utf-8'));
     $('backupJson').addEventListener('click',()=>{saveText('黑箱运营看板备份.json',JSON.stringify(data,null,2),'application/json;charset=utf-8');toast('已生成完整数据备份（包含导入记录），请妥善保存')});
-    $('resetData').addEventListener('click',async()=>{if(cloudUser)return;if(confirm('确定清除当前浏览器的真实数据、所有导入历史并恢复演示数据？建议先下载 JSON 备份。')){if(await saveNewState(demoData())){$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}}});
+    $('resetData').addEventListener('click',async()=>{if(confirm('确定清除当前浏览器的真实数据、所有导入历史并恢复演示数据？建议先下载 JSON 备份。')){if(await saveNewState(demoData())){$('importMessage').textContent='已恢复演示数据';toast('已恢复演示数据')}}});
     $('importHistory').addEventListener('click',e=>{const btn=e.target.closest('.remove-import');if(btn)removeImport(btn.dataset.importId)});
     $('restoreBackup').addEventListener('click',()=> $('restoreInput').click());
     $('restoreInput').addEventListener('change',async e=>{
       const file=e.target.files?.[0];e.target.value='';if(!file)return;
       try{
         if(file.size>20*1024*1024)throw new Error('备份文件超过20MB，请使用精简版');
-        const mode=cloudMode;
+
         const restored=JSON.parse(await file.text());
-        if(mode!==cloudMode)throw new Error('已切换看板，请重新选择备份');
-        if(cloudUser&&cloudRevision!==null)throw new Error('请通过报表追加数据。完整备份只能恢复到空白云看板');
+
+
         if(!Array.isArray(restored.weekly)||!Array.isArray(restored.content)||!Array.isArray(restored.conversion))throw new Error('不是本看板的完整 JSON 备份');
         if(restored.importBase&&!Array.isArray(restored.importEvents))throw new Error('导入历史格式异常');
         if(!confirm('恢复此 JSON 备份会覆盖当前浏览器所有数据与导入记录。确定继续吗？'))return;
@@ -536,5 +453,5 @@
     let fromHash=location.hash.replace('#','');switchView(titles[fromHash]?fromHash:'overview');
   }
   setup();
-  setupCloud();
+  setupCollection();
 })();

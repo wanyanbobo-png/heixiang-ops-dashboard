@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "platforms": {
+    "douyin": {
+      "state": "not_configured",
+      "lastSuccessAt": null,
+      "lastAttemptAt": null,
+      "message": "待官方应用审核、账号授权和逐作品公开许可。",
+      "works": []
+    },
+    "xiaohongshu": {
+      "state": "unavailable",
+      "lastSuccessAt": null,
+      "lastAttemptAt": null,
+      "message": "暂不可自动采集：尚无已核实的官方内容指标权限，继续支持手动报表导入。",
+      "works": []
+    },
+    "meituan": {
+      "state": "unavailable",
+      "lastSuccessAt": null,
+      "lastAttemptAt": null,
+      "message": "暂不可自动采集：尚无已核实的官方内容指标权限，继续支持手动报表导入。",
+      "works": []
+    },
+    "dianping": {
+      "state": "unavailable",
+      "lastSuccessAt": null,
+      "lastAttemptAt": null,
+      "message": "暂不可自动采集：尚无已核实的官方内容指标权限，继续支持手动报表导入。",
+      "works": []
+    }
+  }
+}

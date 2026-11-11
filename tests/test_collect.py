@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from scripts.collect import collect, project, run, CollectionError
+from scripts.collect import collect, project, run, request, CollectionError
 
 ENV = {'DOUYIN_CLIENT_KEY':'test-key','DOUYIN_OPEN_ID':'test-account',
        'DOUYIN_REFRESH_TOKEN':'test-secret','DOUYIN_PUBLIC_ITEM_IDS':'["test-public"]',
@@ -71,6 +71,39 @@ class CollectorTests(unittest.TestCase):
             self.assertNotIn('token=',path.read_text())
             self.assertEqual(run(fail,{},path),0)
             self.assertEqual(json.loads(path.read_text())['platforms']['douyin']['works'],[])
+
+    def test_real_http_uses_post_body_for_refresh_and_get_for_videos(self):
+        from unittest.mock import patch
+        from urllib.parse import parse_qs
+        seen = []
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, size): return b'{"data":{"error_code":"0","access_token":"ok"}}'
+        class Opener:
+            def open(self, req, timeout):
+                seen.append(req)
+                return Response()
+        with patch('urllib.request.build_opener', return_value=Opener()):
+            self.assertEqual(request('/oauth/refresh_token/',
+                {'client_key':'k','refresh_token':'private','grant_type':'refresh_token'})['access_token'],'ok')
+            request('/video/list/', {'open_id':'123','count':10,'cursor':0}, 'access-token')
+        self.assertEqual(seen[0].get_method(),'POST')
+        self.assertNotIn('private',seen[0].full_url)
+        self.assertEqual(parse_qs(seen[0].data.decode())['refresh_token'],['private'])
+        self.assertEqual(seen[1].get_method(),'GET')
+        self.assertIn('/video/list/',seen[1].full_url)
+        self.assertEqual(seen[1].get_header('Access-token'),'access-token')
+
+    def test_official_four_page_limit(self):
+        count = []
+        def fetch(path, params, token=None):
+            if token is None: return self.fake(path,params)
+            count.append((path,params['count']))
+            return {'list':[ITEM], 'has_more':True, 'cursor':len(count)}
+        results=collect(fetch,ENV)
+        self.assertEqual(len(results),1)
+        self.assertEqual(count,[('/video/list/',10)]*4)
 
     def test_does_not_publish_partial_pagination(self):
         def broken(path,params,token=None):
